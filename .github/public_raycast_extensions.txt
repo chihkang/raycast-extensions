@@ -45,4 +45,9 @@ pastefy
 wp-bones
 spike
 github-spark
+anytype
 dub
+e2b
+firecrawl
+resend
+exa

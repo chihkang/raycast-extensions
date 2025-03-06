@@ -32,11 +32,18 @@ const config = {
       audioCodec: "mp3",
       fileExtension: ".mpg",
     },
+    webm: {
+      videoCodec: "libvpx-vp9",
+      audioCodec: "libopus",
+      fileExtension: ".webm",
+    },
   },
 };
 
+export type VideoOutputFormats = keyof typeof config.ffmpegOptions;
+
 // Audio configuration
-const audioConfig = {
+export const audioConfig = {
   mp3: {
     audioCodec: "libmp3lame",
     fileExtension: ".mp3",
@@ -54,6 +61,8 @@ const audioConfig = {
     fileExtension: ".flac",
   },
 };
+
+export type AudioOutputFormats = keyof typeof audioConfig;
 
 // Image configuration
 interface ImageFormatConfig {
@@ -87,9 +96,15 @@ const imageConfig: Record<string, ImageFormatConfig> = {
     nsType: "NSTIFFFileType",
     sipsFormat: "tiff",
   },
+  avif: {
+    fileExtension: ".avif",
+    useFFmpeg: true,
+  },
 };
 
-function getUniqueOutputPath(filePath: string, extension: string): string {
+export type ImageOutputFormats = "jpg" | "png" | "webp" | "heic" | "tiff";
+
+export function getUniqueOutputPath(filePath: string, extension: string): string {
   const outputFilePath = filePath.replace(path.extname(filePath), extension);
   let finalOutputPath = outputFilePath;
   let counter = 1;
@@ -157,6 +172,13 @@ export async function convertImage(filePath: string, outputFormat: keyof typeof 
         return tempPngPath;
       }
 
+      if (outputFormat === "avif") {
+        const ffmpegPath = await getFFmpegPath();
+        await execPromise(`"${ffmpegPath}" -i "${tempPngPath}" -c:v libaom-av1 -crf 30 "${finalOutputPath}"`);
+        fs.unlinkSync(tempPngPath);
+        return finalOutputPath;
+      }
+
       if (formatOptions.sipsFormat) {
         execSync(`sips --setProperty format ${formatOptions.sipsFormat} "${tempPngPath}" --out "${finalOutputPath}"`);
       } else if (formatOptions.nsType) {
@@ -164,6 +186,12 @@ export async function convertImage(filePath: string, outputFormat: keyof typeof 
       }
 
       fs.unlinkSync(tempPngPath);
+      return finalOutputPath;
+    }
+
+    if (outputFormat === "avif") {
+      const ffmpegPath = await getFFmpegPath();
+      await execPromise(`"${ffmpegPath}" -i "${filePath}" -c:v libaom-av1 -crf 30 "${finalOutputPath}"`);
       return finalOutputPath;
     }
 
@@ -211,7 +239,7 @@ export async function optimizeImage(filePath: string, quality: number = 100): Pr
 
 export async function convertVideo(
   filePath: string,
-  outputFormat: "mp4" | "avi" | "mkv" | "mov" | "mpg",
+  outputFormat: "mp4" | "avi" | "mkv" | "mov" | "mpg" | "webm",
 ): Promise<string> {
   const formatOptions = config.ffmpegOptions[outputFormat];
   const finalOutputPath = getUniqueOutputPath(filePath, formatOptions.fileExtension);

@@ -1,5 +1,13 @@
 # System Monitor Changelog
 
+## [Update] - 2025-03-03
+
+- Update the action to open the corresponding tab in the System Monitor
+
+## [Fix] - 2025-01-02
+
+- Fix issue when showing battery level on Intel-based Macs
+
 ## [Chore] - 2024-11-24
 
 - Fixed wording in description
