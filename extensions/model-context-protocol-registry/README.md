@@ -20,7 +20,7 @@ To add a new MCP client to the registry, you need to create a new entry in the `
 
 ### Add a new MCP registry to the registry
 
-To add a new MCP registry to the registry, you need to create a new entry in the `src/registries/index.ts` file. The registry is a function that returns a React component. You can add to the `REGISTRIES` array. A simple example are the built-in registries: `OfficialRegistry` and `CommunityRegistry`. A more complex example is the `SmitheryRegistry` that is used to discover MCP servers from the [Smithery](https://smithery.dev) registry.
+To add a new MCP registry to the registry, you need to create a new entry in the `src/registries/index.ts` file. The registry is a function that returns a React component. You can add to the `REGISTRIES` array. A simple example are the built-in registries: `OfficialRegistry` and `CommunityRegistry`. A more complex example is the `SmitheryRegistry` that is used to discover MCP servers from the [Smithery](https://smithery.ai) registry.
 
 ## MCP Servers
 
@@ -37,7 +37,7 @@ To add a new MCP registry to the registry, you need to create a new entry in the
 | [GitHub](https://github.com/github/github-mcp-server?utm_source=Blog&utm_medium=GitHub&utm_campaign=proplus&utm_notesblogtop) | The GitHub MCP Server is a Model Context Protocol (MCP) server that provides seamless integration with GitHub APIs, enabling advanced automation and interaction capabilities for developers and tools. |
 | [GitLab](https://github.com/modelcontextprotocol/servers/tree/main/src/gitlab) | MCP Server for the GitLab API, enabling project management, file operations, and more. |
 | [E2B Code Interpreter](https://github.com/e2b-dev/mcp-server/blob/main/packages/js/README.md) | A Model Context Protocol server for running code in a secure sandbox by [E2B](https://e2b.dev/). |
-| [Exa](https://github.com/exa-dev/exa-mcp-server) | A Model Context Protocol (MCP) server lets AI assistants like Claude use the Exa AI Search API for web searches. This setup allows AI models to get real-time web information in a safe and controlled way. |
+| [Exa](https://github.com/exa-labs/exa-mcp-server) | A Model Context Protocol (MCP) server lets AI assistants like Claude use the Exa AI Search API for web searches. This setup allows AI models to get real-time web information in a safe and controlled way. |
 | [Google Drive](https://github.com/modelcontextprotocol/servers/tree/main/src/gdrive) | This MCP server integrates with Google Drive to allow listing, reading, and searching over files. |
 | [JetBrains](https://github.com/JetBrains/mcp-jetbrains) | The server proxies requests from client to JetBrains IDE. |
 | [Heroku](https://github.com/heroku/heroku-mcp-server) | The Heroku Platform MCP Server is a specialized Model Context Protocol (MCP) implementation designed to facilitate seamless interaction between large language models (LLMs) and the Heroku Platform. This server provides a robust set of tools and capabilities that enable LLMs to read, manage, and operate Heroku Platform resources. |
@@ -45,19 +45,22 @@ To add a new MCP registry to the registry, you need to create a new entry in the
 | [Paddle](https://github.com/PaddleHQ/paddle-mcp-server) | Paddle Billing is the developer-first merchant of record. We take care of payments, tax, subscriptions, and metrics with one unified API that does it all. This is a Model Context Protocol (MCP) server that provides tools for interacting with the Paddle API. |
 | [Perplexity](https://github.com/ppl-ai/modelcontextprotocol) | An MCP server implementation that integrates the Sonar API to provide Claude with unparalleled real-time, web-wide research. |
 | [Sentry](https://mcp.sentry.dev/) | This service provides a Model Context Provider (MCP) for interacting with Sentry's API. |
+| [Shopify Dev](https://github.com/Shopify/dev-mcp) | MCP server that interacts with Shopify Dev. This protocol supports various tools to interact with different Shopify APIs. |
 | [Slack](https://github.com/modelcontextprotocol/servers/tree/main/src/slack) | This service provides a Model Context Provider (MCP) for interacting with Slack's API. |
 | [Square](https://github.com/square/square-mcp-server) | This project follows the Model Context Protocol standard, allowing AI assistants to interact with Square's connect API. |
 | [Stripe](https://github.com/stripe/agent-toolkit) | This project follows the Model Context Protocol standard, allowing AI assistants to interact with Stripe's API. |
 | [Supabase](https://supabase.com/docs/guides/getting-started/mcp) | This project follows the Model Context Protocol standard, allowing AI assistants to interact with Supabase's API. |
 | [Tavily](https://github.com/tavily-ai/tavily-mcp) | This project follows the Model Context Protocol standard, allowing AI assistants to interact with Tavily's API. |
 | [Xero](https://github.com/XeroAPI/xero-mcp-server) | This is a Model Context Protocol (MCP) server implementation for Xero. It provides a bridge between the MCP protocol and Xero's API, allowing for standardized access to Xero's accounting and business features. |
-| [Firecrawl](https://github.com/firecrawl/firecrawl-mcp) | A Model Context Protocol (MCP) server implementation that integrates with Firecrawl for web scraping capabilities. |
+| [Firecrawl](https://github.com/mendableai/firecrawl-mcp-server) | A Model Context Protocol (MCP) server implementation that integrates with Firecrawl for web scraping capabilities. |
 | [Playwright](https://github.com/microsoft/playwright-mcp) | A Model Context Protocol server that provides browser automation capabilities using Playwright. This server enables LLMs to interact with web pages through structured accessibility snapshots, bypassing the need for screenshots or visually-tuned models. |
 | [Notion](https://github.com/makenotion/notion-mcp-server) | The Notion MCP Server is a Model Context Protocol (MCP) server that provides seamless integration with Notion APIs, enabling advanced automation and interaction capabilities for developers and tools. |
 | [Pydantic Run Python](https://ai.pydantic.dev/mcp/run-python/) | The MCP Run Python package is an MCP server that allows agents to execute Python code in a secure, sandboxed environment. It uses Pyodide to run Python code in a JavaScript environment with Deno, isolating execution from the host system. |
 | [Pydantic Logfire](https://github.com/pydantic/logfire-mcp) | This repository contains a Model Context Protocol (MCP) server with tools that can access the OpenTelemetry traces and metrics you've sent to Logfire. This MCP server enables LLMs to retrieve your application's telemetry data, analyze distributed traces, and make use of the results of arbitrary SQL queries executed using the Logfire APIs. |
 | [Polar](https://docs.polar.sh/integrate/mcp) | Extend the capabilities of your AI Agents with Polar as MCP Server |
 | [ElevenLabs](https://github.com/elevenlabs/elevenlabs-mcp) | Official ElevenLabs Model Context Protocol (MCP) server that enables interaction with powerful Text to Speech and audio processing APIs. This server allows MCP clients like Claude Desktop, Cursor, Windsurf, OpenAI Agents and others to generate speech, clone voices, transcribe audio, and more. |
+| [Nuxt](https://mcp.nuxt.com/) | Official Nuxt Model Context Protocol (MCP) server that enables docs and modules search. |
+| [Zeabur](https://zeabur.com/docs/en-US/mcp) | Official Zeabur Model Context Protocol (MCP) server that enables managing and deploying Zeabur projects. |
 
 ### Community MCP Servers
 

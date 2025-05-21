@@ -31,7 +31,7 @@ export function SmitheryRegistry(props: RegistryProps) {
 function MissingAPIKey() {
   const markdown = `
   # Missing API Key
-  To use the Smithery MCP Regsitry, you need to add youer pesonal API key to the command's preferences. 
+  To use the Smithery MCP Registry, you need to add your personal API key to the command's preferences.
 
   ![Missing API Key](smithery-missing-api-key.png)
   
@@ -162,7 +162,7 @@ function InstallServerAction(props: { server: Server }) {
     return (
       <Action.Push
         icon={Icon.ArrowDownCircle}
-        title="Configure MCP Server"
+        title="Configure Server"
         target={<ConfigureServerForm connection={firstConnection} server={props.server} />}
       />
     );
@@ -226,7 +226,7 @@ function InstallSmitheryServerAction(props: { server: Server; config?: Record<st
   }
 
   return (
-    <ActionPanel.Submenu title="Install MCP Server" isLoading={isLoading}>
+    <ActionPanel.Submenu title="Install Server" isLoading={isLoading}>
       <Action.InstallMCPServer
         icon={{ source: { light: Icon.RaycastLogoPos, dark: Icon.RaycastLogoNeg } }}
         title="Raycast"
