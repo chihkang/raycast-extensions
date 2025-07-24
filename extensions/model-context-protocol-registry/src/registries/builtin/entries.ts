@@ -139,7 +139,7 @@ export const OFFICIAL_ENTRIES: RegistryEntry[] = [
     title: "Google Drive",
     description: "This MCP server integrates with Google Drive to allow listing, reading, and searching over files.",
     icon: "https://svgl.app/library/drive.svg",
-    homepage: "https://github.com/modelcontextprotocol/servers/tree/main/src/gdrive",
+    homepage: "https://github.com/modelcontextprotocol/servers-archived/tree/main/src/gdrive",
     configuration: {
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-gdrive"],
@@ -171,6 +171,49 @@ export const OFFICIAL_ENTRIES: RegistryEntry[] = [
       args: ["-y", "@heroku/mcp-server"],
       env: {
         HEROKU_API_KEY: "YOUR_API_KEY_HERE",
+      },
+    },
+  },
+  {
+    name: "kagimcp",
+    title: "Kagi Search",
+    description: "The Official Model Context Protocol (MCP) server for Kagi search & other tools.",
+    icon: "kagi.svg",
+    homepage: "https://github.com/kagisearch/kagimcp",
+    configuration: {
+      command: "uvx",
+      args: ["kagimcp"],
+      env: {
+        KAGI_API_KEY: "YOUR_API_KEY_HERE",
+        KAGI_SUMMARIZER_ENGINE: "YOUR_ENGINE_CHOICE_HERE", // Defaults to "cecil" engine if env var not present
+      },
+    },
+  },
+  {
+    name: "keboola",
+    title: "Keboola",
+    description:
+      "Keboola MCP Server is an open-source bridge between your Keboola project and modern AI tools. It turns Keboola features—like storage access, SQL transformations, and job triggers—into callable tools for Claude, Cursor, CrewAI, LangChain, Amazon Q, and more.",
+    icon: "keboola.svg",
+    homepage: "https://github.com/keboola/mcp-server",
+    configuration: {
+      command: "npx",
+      args: ["mcp-remote", "https://mcp.canary-orion.keboola.dev/sse"],
+    },
+  },
+  {
+    name: "keboola-local",
+    title: "Keboola (Local)",
+    description:
+      "Keboola MCP Server is an open-source bridge between your Keboola project and modern AI tools. It turns Keboola features—like storage access, SQL transformations, and job triggers—into callable tools for Claude, Cursor, CrewAI, LangChain, Amazon Q, and more. This is the local server version.",
+    icon: "keboola.svg",
+    homepage: "https://github.com/keboola/mcp-server",
+    configuration: {
+      command: "uvx",
+      args: ["keboola_mcp_server", "--api-url", "https://connection.YOUR_REGION.keboola.com"],
+      env: {
+        KBC_STORAGE_TOKEN: "your_keboola_storage_token",
+        KBC_WORKSPACE_SCHEMA: "your_workspace_schema",
       },
     },
   },
@@ -222,7 +265,7 @@ export const OFFICIAL_ENTRIES: RegistryEntry[] = [
     homepage: "https://www.prisma.io/docs/postgres/integrations/mcp-server",
     configuration: {
       command: "npx",
-      args: ["-y", "prisma", "mcp"],
+      args: ["-y", "mcp-remote", "https://mcp.prisma.io/mcp"],
     },
   },
   {
@@ -316,6 +359,18 @@ export const OFFICIAL_ENTRIES: RegistryEntry[] = [
     },
   },
   {
+    name: "thena",
+    title: "Thena",
+    description:
+      "A Model Context Protocol server that enables AI assistants to interact with Thena's services, providing seamless integration and enhanced capabilities for AI-powered applications.",
+    icon: "thena.svg",
+    homepage: "https://thena.ai",
+    configuration: {
+      command: "npx",
+      args: ["-y", "mcp-remote", "https://mcp.thena.ai/sse"],
+    },
+  },
+  {
     name: "xero",
     title: "Xero",
     description:
@@ -397,7 +452,7 @@ export const OFFICIAL_ENTRIES: RegistryEntry[] = [
     name: "pydantic-logfire",
     title: "Pydantic Logfire",
     description:
-      "This repository contains a Model Context Protocol (MCP) server with tools that can access the OpenTelemetry traces and metrics you've sent to Logfire.\n\nThis MCP server enables LLMs to retrieve your application's telemetry data, analyze distributed traces, and make use of the results of arbitrary SQL queries executed using the Logfire APIs.",
+      "This repository contains a Model Context Protocol (MCP) server with tools that can access the OpenTelemetry traces and metrics you've sent to Logfire. This MCP server enables LLMs to retrieve your application's telemetry data, analyze distributed traces, and make use of the results of arbitrary SQL queries executed using the Logfire APIs.",
     icon: "pydantic.svg",
     homepage: "https://github.com/pydantic/logfire-mcp",
     configuration: {
@@ -473,6 +528,49 @@ export const OFFICIAL_ENTRIES: RegistryEntry[] = [
       env: {
         ZEABUR_TOKEN: "YOUR_ZEABUR_TOKEN_HERE",
       },
+    },
+  },
+  {
+    name: "grafana",
+    title: "Grafana",
+    description:
+      "Official Grafana MCP server that provides seamless integration with Grafana APIs, enabling monitoring, visualization, and observability capabilities for developers and tools.",
+    icon: "https://svgl.app/library/grafana.svg",
+    homepage: "https://github.com/grafana/mcp-grafana",
+    configuration: {
+      command: "docker",
+      args: ["run", "--rm", "-p", "8000:8000", "-e", "GRAFANA_URL", "-e", "GRAFANA_API_KEY", "mcp/grafana"],
+      env: {
+        GRAFANA_URL: "YOUR_GRAFANA_URL_HERE",
+        GRAFANA_API_KEY: "YOUR_SERVICE_ACCOUNT_TOKEN_HERE",
+      },
+    },
+  },
+  {
+    name: "anytype",
+    title: "Anytype",
+    description:
+      "A Model Context Protocol (MCP) server for Anytype that enables AI assistants to seamlessly interact with Anytype's API through natural language. Manage spaces, objects, properties, types and more in your knowledge base.",
+    icon: "anytype.png",
+    homepage: "https://github.com/anyproto/anytype-mcp",
+    configuration: {
+      command: "npx",
+      args: ["-y", "@anyproto/anytype-mcp"],
+      env: {
+        OPENAPI_MCP_HEADERS: '{"Authorization":"Bearer <YOUR_API_KEY>", "Anytype-Version":"2025-05-20"}',
+      },
+    },
+  },
+  {
+    name: "gen-pdf",
+    title: "Gen-PDF",
+    description:
+      "MCP server to generate professional looking PDF. Perfect for creating reports, invoices, contracts, and more.",
+    icon: "https://gen-pdf.com/favicon.ico",
+    homepage: "https://gen-pdf.com",
+    configuration: {
+      command: "npx",
+      args: ["-y", "mcp-remote", "https://gen-pdf.com/mcp"],
     },
   },
 ];
@@ -662,6 +760,22 @@ export const COMMUNITY_ENTRIES: RegistryEntry[] = [
       env: {
         MONDAY_API_KEY: "your-monday-api-key",
         MONDAY_WORKSPACE_NAME: "your-monday-workspace-name",
+      },
+    },
+  },
+  {
+    name: "paperless-ngx",
+    title: "Paperless-NGX",
+    description:
+      "An MCP server for interacting with a Paperless-NGX API server. Manage documents, tags, correspondents, and document types in your Paperless-NGX instance.",
+    icon: "https://icons.duckduckgo.com/ip3/paperless-ngx.com.ico",
+    homepage: "https://github.com/baruchiro/paperless-mcp",
+    configuration: {
+      command: "npx",
+      args: ["-y", "@baruchiro/paperless-mcp@latest"],
+      env: {
+        PAPERLESS_URL: "http://your-paperless-instance:8000",
+        PAPERLESS_API_KEY: "your-api-token",
       },
     },
   },
