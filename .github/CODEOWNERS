@@ -84,6 +84,7 @@
 /extensions/anycoffee                                               @aymericio
 /extensions/anytype                                                 @jmetrikat @Juoper
 /extensions/apify                                                   @xmok
+/extensions/apis-guru-search                                        @zebapy
 /extensions/app-creator                                             @EvanZhouDev
 /extensions/app-icon-generator                                      @hunter-ji @pernielsentikaer
 /extensions/app-keeper-manager                                      @onlysunjun
@@ -344,7 +345,7 @@
 /extensions/code-saver                                              @Gnosnay
 /extensions/code-smells                                             @omorest
 /extensions/code-stash                                              @ben-greenwood
-/extensions/codeforces-extension                                    @Iron0utlaw @m3hu1 @pernielsentikaer
+/extensions/codeforces-extension                                    @Iron0utlaw @m3hu1 @pernielsentikaer @YourMCGeek
 /extensions/codegeex                                                @MBearo
 /extensions/codegrepper                                             @emircanerkul @pernielsentikaer
 /extensions/codemagic                                               @Imgkl
@@ -800,6 +801,7 @@
 /extensions/gitmoji                                                 @ricoberger @joshmedeski @ridemountainpig
 /extensions/gitpod                                                  @henit-chobisa @Palanikannan1437 @henit-chobisa @pernielsentikaer @henit-chobisa
 /extensions/gleam-packages                                          @ryanmiville
+/extensions/gles-to-malioc                                          @RomanVPX
 /extensions/glide                                                   @titouv
 /extensions/global-media-key                                        @douo
 /extensions/glossary                                                @javierarce
@@ -1145,6 +1147,7 @@
 /extensions/link-cleaner                                            @haku-huang @xmok @ezzylan @cupcakearmy
 /extensions/linkace                                                 @jaspermayone
 /extensions/linkding                                                @InteractiveNinja @xmok @jose-elias-alvarez
+/extensions/linkinize                                               @NaderIkladious
 /extensions/linkwarden                                              @leodbrs @xmok
 /extensions/linux-command                                           @jaywcjlove
 /extensions/lipsum                                                  @seita1996
@@ -1536,6 +1539,7 @@
 /extensions/parcel                                                  @marcmagn1 @omarshahine @bendrucker @damian-duchnowski @xilopaint @aidenkt @pernielsentikaer
 /extensions/parcel-tracker                                          @jjhok
 /extensions/parrot-translate                                        @Haojen
+/extensions/parse                                                   @traf
 /extensions/parse-logs                                              @NormCopeland
 /extensions/party-parrot                                            @thomaspaulmann
 /extensions/pass                                                    @capipo @camiloaromero23
