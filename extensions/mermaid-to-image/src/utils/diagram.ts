@@ -71,7 +71,7 @@ async function generateDiagramWithExplicitNode(
       "-b",
       "transparent",
       "--scale",
-      String(options?.scale || 4), // 預設提高到 4
+      String(options?.scale || 2), // default increased to 4
     ];
 
     // Add optional width and height if specified
@@ -207,7 +207,7 @@ export async function generateMermaidDiagram(
       preferences.theme,
       tempFileRef,
       timeoutInMs,
-      options, // 傳遞 options 參數
+      options, // pass options parameter
     );
   } catch (error) {
     // Handle errors at the top level
