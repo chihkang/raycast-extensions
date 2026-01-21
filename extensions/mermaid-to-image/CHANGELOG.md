@@ -1,6 +1,6 @@
 # Mermaid to Image Changelog
 
-## [AI Tool Output & Preferences Update] - {PR_MERGE_DATE}
+## [AI Tool Output & Preferences Update] - 2026-01-21
 ### Added
 - **Scale Preference (Dropdown)**: Users can choose scale 2/3/4 with default 2 for AI-generated images.
 
