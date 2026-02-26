@@ -1,4 +1,4 @@
-import { List, Icon, getPreferenceValues } from "@raycast/api";
+import { List, Icon, getPreferenceValues, showToast, Toast } from "@raycast/api";
 import { useFetch } from "@raycast/utils";
 import { useState, useMemo, useEffect } from "react";
 import { Feed, GitHubPR, StoreItem, FilterValue } from "./types";
@@ -19,6 +19,7 @@ import { useFilterToggles } from "./hooks/useFilterToggles";
 const FEED_URL = "https://www.raycast.com/store/feed.json";
 const GITHUB_PRS_URL =
   "https://api.github.com/repos/raycast/extensions/pulls?state=closed&sort=updated&direction=desc&per_page=50";
+const REFRESH_COOLDOWN_MS = 10000; // 10 seconds cooldown between refreshes
 
 // =============================================================================
 // Command
@@ -27,26 +28,63 @@ const GITHUB_PRS_URL =
 export default function Command() {
   const { trackReadStatus } = getPreferenceValues<Preferences>();
   const [filter, setFilter] = useState<FilterValue>("all");
-  const { toggles, toggleMacOS, toggleWindows, toggleInstalledOnly } = useFilterToggles();
+  const { toggles, toggleMacOS, toggleWindows } = useFilterToggles();
 
-  const { data: feedData, isLoading: feedLoading } = useFetch<Feed>(FEED_URL, {
+  const {
+    data: feedData,
+    isLoading: feedLoading,
+    revalidate: revalidateFeed,
+  } = useFetch<Feed>(FEED_URL, {
     keepPreviousData: true,
   });
 
-  const { data: prsData, isLoading: prsLoading } = useFetch<GitHubPR[]>(GITHUB_PRS_URL, {
+  const {
+    data: prsData,
+    isLoading: prsLoading,
+    revalidate: revalidatePRs,
+  } = useFetch<GitHubPR[]>(GITHUB_PRS_URL, {
     keepPreviousData: true,
     headers: {
       Accept: "application/vnd.github.v3+json",
     },
   });
 
+  const [lastRefreshTime, setLastRefreshTime] = useState<number>(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    const now = Date.now();
+    const timeSinceLastRefresh = now - lastRefreshTime;
+
+    if (timeSinceLastRefresh < REFRESH_COOLDOWN_MS) {
+      const remainingSeconds = Math.ceil((REFRESH_COOLDOWN_MS - timeSinceLastRefresh) / 1000);
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Please wait before refreshing",
+        message: `Try again in ${remainingSeconds} second${remainingSeconds !== 1 ? "s" : ""}`,
+      });
+      return;
+    }
+
+    setIsRefreshing(true);
+    setLastRefreshTime(now);
+
+    revalidateFeed();
+    revalidatePRs();
+    await showToast({
+      style: Toast.Style.Success,
+      title: "Feed refreshed",
+    });
+    setIsRefreshing(false);
+  };
+
   const isLoading = feedLoading || prsLoading;
 
   // Get installed extensions if filter is enabled
   const installedSlugs = useMemo(() => {
-    if (!toggles.installedOnly) return null;
+    if (filter !== "my-updates") return null;
     return getInstalledExtensionSlugs();
-  }, [toggles.installedOnly]);
+  }, [filter]);
 
   const [updatedItems, setUpdatedItems] = useState<StoreItem[]>([]);
   const [newItems, setNewItems] = useState<StoreItem[]>([]);
@@ -60,7 +98,9 @@ export default function Command() {
     const items = feedData.items ?? [];
     Promise.all(
       items.map(async (item) => {
-        const { extension } = parseExtensionUrl(item.url);
+        const parsed = parseExtensionUrl(item.url);
+        if (!parsed) return null;
+        const { extension } = parsed;
         const pkgInfo = await fetchExtensionPackageInfo(extension);
         return {
           id: item.id,
@@ -79,14 +119,17 @@ export default function Command() {
           extensionIcon: pkgInfo?.icon,
         };
       }),
-    ).then(setNewItems);
+    ).then((results) => setNewItems(results.filter((item): item is NonNullable<typeof item> => item !== null)));
   }, [feedData]);
 
   // Fetch updated items from PRs (async because we need to fetch package.json for each)
   useEffect(() => {
     if (!prsData) return;
-    const newSlugs = new Set(newItems.map((i) => i.extensionSlug).filter(Boolean));
-    convertPRsToStoreItems(prsData, newSlugs as Set<string>).then(setUpdatedItems);
+    const newItemDates = new Map<string, string>();
+    for (const item of newItems) {
+      if (item.extensionSlug) newItemDates.set(item.extensionSlug, item.date);
+    }
+    convertPRsToStoreItems(prsData, newItemDates).then(setUpdatedItems);
   }, [prsData, newItems]);
 
   const allItems = useMemo(() => {
@@ -101,6 +144,11 @@ export default function Command() {
         break;
       case "updated":
         items = updatedItems;
+        break;
+      case "my-updates":
+        items = installedSlugs
+          ? updatedItems.filter((item) => (item.extensionSlug ? installedSlugs.has(item.extensionSlug) : false))
+          : [];
         break;
       default:
         items = allItems;
@@ -120,15 +168,6 @@ export default function Command() {
       if (!toggles.showWindows && hasWindows && !hasMac) return false;
       return true;
     });
-
-    // Apply installed extensions filter — only to updated items
-    if (toggles.installedOnly && installedSlugs) {
-      items = items.filter((item) => {
-        // Don't filter new extensions — only filter updated ones
-        if (item.type === "new") return true;
-        return item.extensionSlug ? installedSlugs.has(item.extensionSlug) : true;
-      });
-    }
 
     // Filter out read items when tracking is enabled
     if (trackReadStatus) {
@@ -157,8 +196,9 @@ export default function Command() {
       searchBarAccessory={
         <List.Dropdown tooltip="Filter" storeValue onChange={(val) => setFilter(val as FilterValue)}>
           <List.Dropdown.Item title="Show All" value="all" icon={Icon.AppWindowGrid3x3} />
-          <List.Dropdown.Item title="New Only" value="new" icon={Icon.StarCircle} />
-          <List.Dropdown.Item title="Updated Only" value="updated" icon={Icon.ArrowUpCircle} />
+          <List.Dropdown.Item title="New" value="new" icon={Icon.StarCircle} />
+          <List.Dropdown.Item title="Updates" value="updated" icon={Icon.ArrowUpCircle} />
+          <List.Dropdown.Item title="My Updates" value="my-updates" icon={Icon.Person} />
         </List.Dropdown>
       }
     >
@@ -171,23 +211,28 @@ export default function Command() {
               ? "All items have been marked as read"
               : filter === "all"
                 ? "Unable to load the feed"
-                : `No ${filter} extensions found`
+                : filter === "my-updates"
+                  ? "No updates found for your installed extensions"
+                  : `No ${filter} extensions found`
           }
         />
       ) : (
-        displayItems.map((item) => (
+        displayItems.map((item, index) => (
           <ExtensionListItem
             key={item.id}
             item={item}
+            items={displayItems}
+            currentIndex={index}
             filter={filter}
             trackReadStatus={trackReadStatus}
             toggles={toggles}
             onToggleMacOS={toggleMacOS}
             onToggleWindows={toggleWindows}
-            onToggleInstalledOnly={toggleInstalledOnly}
             onMarkAsRead={markAsRead}
             onMarkAllAsRead={handleMarkAllAsRead}
             onUndo={undo}
+            onRefresh={handleRefresh}
+            isRefreshing={isRefreshing}
           />
         ))
       )}

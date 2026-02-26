@@ -1,33 +1,40 @@
 import { List, Icon, Color } from "@raycast/api";
 import { StoreItem, FilterValue } from "../types";
+import { MACOS_TINT_COLOR, WINDOWS_TINT_COLOR } from "../utils";
 import { FilterToggles } from "../hooks/useFilterToggles";
 import { ExtensionItemDetail } from "./ExtensionItemDetail";
 import { ExtensionActions } from "./ExtensionActions";
 
 interface ExtensionListItemProps {
   item: StoreItem;
+  items: StoreItem[];
+  currentIndex: number;
   filter: FilterValue;
   trackReadStatus: boolean;
   toggles: FilterToggles;
   onToggleMacOS: () => Promise<void>;
   onToggleWindows: () => Promise<void>;
-  onToggleInstalledOnly: () => Promise<void>;
   onMarkAsRead?: (itemId: string) => Promise<void>;
   onMarkAllAsRead?: () => Promise<void>;
   onUndo?: () => Promise<void>;
+  onRefresh?: () => void;
+  isRefreshing?: boolean;
 }
 
 export function ExtensionListItem({
   item,
+  items,
+  currentIndex,
   filter,
   trackReadStatus,
   toggles,
   onToggleMacOS,
   onToggleWindows,
-  onToggleInstalledOnly,
   onMarkAsRead,
   onMarkAllAsRead,
   onUndo,
+  onRefresh,
+  isRefreshing,
 }: ExtensionListItemProps) {
   const showTypeTag = filter === "all";
 
@@ -37,10 +44,10 @@ export function ExtensionListItem({
   const hasMac = item.platforms?.some((p) => p.toLowerCase() === "macos") ?? true;
   const hasWindows = item.platforms?.some((p) => p.toLowerCase() === "windows") ?? false;
   if (hasMac) {
-    accessories.push({ icon: { source: "platform-macos.svg", tintColor: "#0A64F0" }, tooltip: "macOS" });
+    accessories.push({ icon: { source: "platform-macos.svg", tintColor: MACOS_TINT_COLOR }, tooltip: "macOS" });
   }
   if (hasWindows) {
-    accessories.push({ icon: { source: "platform-windows.svg", tintColor: "#0078D7" }, tooltip: "Windows" });
+    accessories.push({ icon: { source: "platform-windows.svg", tintColor: WINDOWS_TINT_COLOR }, tooltip: "Windows" });
   }
 
   if (showTypeTag) {
@@ -62,14 +69,17 @@ export function ExtensionListItem({
       actions={
         <ExtensionActions
           item={item}
+          items={items}
+          currentIndex={currentIndex}
           trackReadStatus={trackReadStatus}
           toggles={toggles}
           onToggleMacOS={onToggleMacOS}
           onToggleWindows={onToggleWindows}
-          onToggleInstalledOnly={onToggleInstalledOnly}
           onMarkAsRead={onMarkAsRead}
           onMarkAllAsRead={onMarkAllAsRead}
           onUndo={onUndo}
+          onRefresh={onRefresh}
+          isRefreshing={isRefreshing}
         />
       }
     />
