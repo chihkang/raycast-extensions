@@ -1,5 +1,5 @@
-import { Action, ActionPanel, LaunchProps, List, getPreferenceValues } from "@raycast/api";
-import { Windows, focusWindow, getWindows } from "./utils/appSwitcher";
+import { Action, ActionPanel, Icon, LaunchProps, List, getPreferenceValues } from "@raycast/api";
+import { Windows, focusWindow, getWindows, pullWindowToCurrentWorkspace, setWindowTiling } from "./utils/appSwitcher";
 import { useEffect, useMemo, useState } from "react";
 import { useCachedState } from "@raycast/utils";
 
@@ -74,6 +74,22 @@ export default function Command(
                       title="Focus Window"
                       onAction={() => {
                         focusWindow(window["window-id"].toString());
+                      }}
+                    />
+                    <Action
+                      title="Pull to Current Workspace"
+                      icon={Icon.ArrowDown}
+                      shortcut={{ modifiers: ["shift"], key: "enter" }}
+                      onAction={async () => {
+                        await pullWindowToCurrentWorkspace(window["window-id"].toString());
+                      }}
+                    />
+                    <Action
+                      title="Set to Tiling"
+                      icon={Icon.AppWindowGrid3x3}
+                      shortcut={{ modifiers: ["cmd"], key: "t" }}
+                      onAction={async () => {
+                        await setWindowTiling(window["window-id"].toString());
                       }}
                     />
                   </ActionPanel>
