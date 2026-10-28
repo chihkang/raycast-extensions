@@ -21,8 +21,9 @@
     "litomore",
     "ridemountainpig",
     "meganpearson",
-    "alastair_scheuermann",
-    "dangkhoipro"
+    "alastairsounds",
+    "dangkhoipro",
+    "cblokkeel"
   ],
   "keywords": [
     "pomodoro",
@@ -112,6 +113,11 @@
       "name": "continue-timer",
       "title": "Continue Timer",
       "description": "Continues the paused pomodoro timer"
+    },
+    {
+      "name": "skip-timer",
+      "title": "Skip Timer",
+      "description": "Skips the current interval and starts the next one"
     }
   ],
   "ai": {
@@ -204,6 +210,19 @@
         "input": "@pomodoro continue the timer"
       },
       {
+        "mocks": {
+          "skip-timer": "Skipped to Short Break"
+        },
+        "expected": [
+          {
+            "callsTool": {
+              "name": "skip-timer"
+            }
+          }
+        ],
+        "input": "@pomodoro skip to the next interval"
+      },
+      {
         "input": "@pomodoro start a 4min 30 sec timer",
         "mocks": {
           "start-timer": {
@@ -249,6 +268,15 @@
       "description": "Hide time on the Menu Bar when the timer is stopped",
       "default": true,
       "label": "Hide the time when stopped"
+    },
+    {
+      "name": "hideMenuBarWhenStopped",
+      "type": "checkbox",
+      "required": false,
+      "title": "Hide Menu Bar When Stopped",
+      "description": "Hide the entire menu bar item when the timer is stopped",
+      "default": false,
+      "label": "Hide menu bar when stopped"
     },
     {
       "name": "enableFocusWhileFocused",
@@ -315,6 +343,10 @@
           "title": "50:00"
         },
         {
+          "value": "52",
+          "title": "52:00"
+        },
+        {
           "value": "55",
           "title": "55:00"
         },
@@ -355,6 +387,10 @@
         {
           "value": "15",
           "title": "15:00"
+        },
+        {
+          "value": "17",
+          "title": "17:00"
         },
         {
           "value": "20",
@@ -421,6 +457,10 @@
         {
           "value": "15",
           "title": "15:00"
+        },
+        {
+          "value": "17",
+          "title": "17:00"
         },
         {
           "value": "20",

@@ -65,6 +65,8 @@ export type Activity = {
   steps: Step[] | null;
   source: string | null;
   externalId: string | null;
+  plannedActivityId: string | null;
+  completedActivityId: string | null;
   createdAt: number;
   updatedAt: number;
 };
@@ -75,8 +77,11 @@ export type SportType =
   | "swim"
   | "hike"
   | "yoga"
+  | "tennis"
+  | "skiing"
   | "nordicski"
   | "strength"
+  | "surf"
   | "other";
 
 export type CreateActivityInput = {
@@ -103,6 +108,7 @@ export type ListActivitiesParams = {
   completed?: string;
   limit?: number;
   offset?: number;
+  includePaired?: boolean;
 };
 
 export type ListActivitiesResponse = {
@@ -122,4 +128,71 @@ export type DeleteResponse = {
 
 export type BatchDeleteResponse = {
   deleted: number;
+};
+
+export type PairResponse = {
+  paired: true;
+  completedActivityId: string;
+  plannedActivityId: string;
+};
+
+export type UnpairResponse = {
+  unpaired: true;
+  activityId: string;
+  partnerId: string | null;
+};
+
+export type ReadinessBand = "prime" | "high" | "moderate" | "low" | "poor";
+export type LoadBand = "low" | "safe" | "elevated" | "high";
+
+export type ReadinessDriver = {
+  key: "hrv" | "restingHR" | "sleep" | "load" | "exertion" | string;
+  label: string;
+  value: number;
+  baseline: number;
+  z: number;
+  weight: number;
+  unit?: string;
+  source?: string;
+  sessions?: number;
+};
+
+export type TrainingStatus = {
+  date: string;
+  readiness: {
+    basis: string;
+    score: number;
+    band: ReadinessBand;
+    drivers: ReadinessDriver[];
+  } | null;
+  readinessUnavailable:
+    | "no_body_metrics"
+    | "no_readings_today"
+    | "insufficient_baseline"
+    | null;
+  load: {
+    fitness: number;
+    fatigue: number;
+    form: number;
+    ratio: number | null;
+    band: LoadBand | null;
+  } | null;
+  loadUnavailable: "no_load_data" | "no_workouts" | null;
+  projection: { date: string; ratio: number } | null;
+  providerScores: {
+    source: string;
+    key: string;
+    label: string;
+    value: number;
+    scale: string;
+  }[];
+};
+
+export type HealthMetricsResponse = {
+  days: {
+    date: string;
+    values: Record<string, number>;
+    sources: Record<string, string>;
+  }[];
+  total: number;
 };

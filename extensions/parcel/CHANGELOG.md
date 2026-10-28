@@ -1,5 +1,16 @@
 # Parcel Changelog
 
+## [Fix Carrier Loading] - 2026-08-29
+
+- Fixed the "Add Delivery" carrier dropdown failing to load after a change to Parcel's carrier list format
+- Carrier names display in "My Deliveries" again instead of falling back to carrier codes
+- API responses are validated, so future changes to Parcel's API produce a clear message and a retry action instead of an internal error
+
+## [Ambiguous dotted date preference] - 2026-05-10
+
+- Ambiguous dot-separated dates (e.g. `06.07.2025` when both parts could be month or day) use a new extension preference: **Month/Day first (US)** vs **Day/Month first (EU/GB)**
+- Expected delivery **day countdown** uses the same parser as on-screen dates so badges stay consistent with the formatted text
+
 ## [Fix Carrier Dropdown Default] - 2026-01-30
 
 - Fixed the "Add Delivery" carrier dropdown auto-selecting the first carrier (4PX) instead of starting with no selection
@@ -22,7 +33,7 @@
 - The Add Delivery form now prevents leaving required form fields empty
 - Deliveries added from the extension will automatically use your system's language in Parcel
 - Replaced the success toast with a cleaner Raycast HUD notification
-- Fixed API errors to display the specific error from Parcel rather than a generic "Something went wrong" 
+- Fixed API errors to display the specific error from Parcel rather than a generic "Something went wrong"
 
 ## [Detail View Refactor, Metadata, UX] - 2025-09-19
 
@@ -72,3 +83,4 @@
 - Added action to copy tracking numbers
 - Added support for filtering between active and recent deliveries
 - Created a clean UI with color-coded status indicators and delivery timeframes
+

@@ -1,10 +1,30 @@
 import { LocalStorage } from "@raycast/api";
+import { execFile } from "child_process";
+import { promisify } from "util";
+import path from "path";
 import {
   listAllSessions,
   streamSessionUsage,
   SessionMetadata,
-  SessionUsage,
 } from "./session-parser";
+import { isWindows } from "./platform";
+import { calculateMessageCost, calculateUsageCost } from "./pricing";
+import { getLocalDateKey } from "./date";
+
+const execFilePromise = promisify(execFile);
+
+/**
+ * Lightweight projection of a session, used for "Top Sessions" lists in
+ * UsageStats. Avoids retaining the full SessionMetadata reference inside the
+ * cached stats object (which previously aliased the same memory across the
+ * in-memory cache and React state).
+ */
+export interface TopSessionSummary {
+  id: string;
+  projectName: string;
+  firstMessage: string;
+  cost: number;
+}
 
 export interface UsageStats {
   totalSessions: number;
@@ -14,87 +34,7 @@ export interface UsageStats {
   totalCacheReadTokens: number;
   totalCacheCreationTokens: number;
   sessionsByProject: Record<string, { count: number; cost: number }>;
-  topSessions: SessionMetadata[];
-}
-
-// Pricing per million tokens from https://docs.anthropic.com/en/docs/about-claude/pricing
-// Cache read = 0.1x base input, cache write (5-min TTL) = 1.25x base input
-// Ordered most-specific first for substring matching
-const MODEL_PRICING: Array<{
-  match: string;
-  inputPerMTok: number;
-  outputPerMTok: number;
-  cacheReadPerMTok: number;
-  cacheWritePerMTok: number;
-}> = [
-  // Opus 4.5/4.6 ($5/$25 tier)
-  {
-    match: "opus-4-5",
-    inputPerMTok: 5,
-    outputPerMTok: 25,
-    cacheReadPerMTok: 0.5,
-    cacheWritePerMTok: 6.25,
-  },
-  {
-    match: "opus-4-6",
-    inputPerMTok: 5,
-    outputPerMTok: 25,
-    cacheReadPerMTok: 0.5,
-    cacheWritePerMTok: 6.25,
-  },
-  // Opus 4/4.1 ($15/$75 tier)
-  {
-    match: "opus",
-    inputPerMTok: 15,
-    outputPerMTok: 75,
-    cacheReadPerMTok: 1.5,
-    cacheWritePerMTok: 18.75,
-  },
-  // All Sonnet 4.x ($3/$15 tier)
-  {
-    match: "sonnet",
-    inputPerMTok: 3,
-    outputPerMTok: 15,
-    cacheReadPerMTok: 0.3,
-    cacheWritePerMTok: 3.75,
-  },
-  // Haiku 4.5 ($1/$5 tier)
-  {
-    match: "haiku-4",
-    inputPerMTok: 1,
-    outputPerMTok: 5,
-    cacheReadPerMTok: 0.1,
-    cacheWritePerMTok: 1.25,
-  },
-  // Haiku 3.5 ($0.80/$4 tier)
-  {
-    match: "haiku",
-    inputPerMTok: 0.8,
-    outputPerMTok: 4,
-    cacheReadPerMTok: 0.08,
-    cacheWritePerMTok: 1,
-  },
-];
-
-const DEFAULT_PRICING = MODEL_PRICING.find((p) => p.match === "sonnet")!;
-
-function resolvePricing(model?: string) {
-  if (!model) return DEFAULT_PRICING;
-  const lower = model.toLowerCase();
-  for (const pricing of MODEL_PRICING) {
-    if (lower.includes(pricing.match)) return pricing;
-  }
-  return DEFAULT_PRICING;
-}
-
-function calculateUsageCost(usage: SessionUsage): number {
-  const p = resolvePricing(usage.model);
-  return (
-    (usage.inputTokens / 1_000_000) * p.inputPerMTok +
-    (usage.outputTokens / 1_000_000) * p.outputPerMTok +
-    (usage.cacheReadTokens / 1_000_000) * p.cacheReadPerMTok +
-    (usage.cacheCreationTokens / 1_000_000) * p.cacheWritePerMTok
-  );
+  topSessions: TopSessionSummary[];
 }
 
 export interface DailyStats {
@@ -103,8 +43,9 @@ export interface DailyStats {
   cost: number;
 }
 
-const STATS_CACHE_KEY = "claudecast-stats-v2";
+const STATS_CACHE_KEY = "claudecast-stats-v4";
 const STATS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const TODAY_STATS_LOCALSTORAGE_KEY = "claudecast-today-stats-v3";
 
 // In-memory cache for today's stats to prevent repeated disk reads
 // This is especially important for menu bar monitors that refresh frequently
@@ -120,17 +61,24 @@ interface CachedStats {
   timestamp: number;
 }
 
+interface PersistedTodayStats {
+  stats: UsageStats;
+  timestamp: number;
+  date: string;
+}
+
 /**
- * Get usage statistics for today
- * Uses in-memory caching to prevent repeated disk reads (important for menu bar)
- * Also uses date filtering to only parse today's session files
+ * Get usage statistics for today.
+ * Two-tier cache: in-memory (fast, lost on worker restart) + LocalStorage
+ * (persists across Raycast menu-bar cold starts so the 30s background tick
+ * doesn't pay full disk cost on every refresh).
  */
 export async function getTodayStats(): Promise<UsageStats> {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayStr = today.toISOString().split("T")[0];
+  const todayStr = getLocalDateKey(today)!;
 
-  // Check in-memory cache
+  // Tier 1: in-memory cache.
   if (
     todayStatsCache &&
     todayStatsCache.date === todayStr &&
@@ -139,16 +87,41 @@ export async function getTodayStats(): Promise<UsageStats> {
     return todayStatsCache.stats;
   }
 
-  // Only load sessions modified today - much more efficient
-  const todaySessions = await listAllSessions({ afterDate: today });
+  // Tier 2: LocalStorage. Survives worker restarts.
+  try {
+    const persisted = await LocalStorage.getItem<string>(
+      TODAY_STATS_LOCALSTORAGE_KEY,
+    );
+    if (persisted) {
+      const parsed: PersistedTodayStats = JSON.parse(persisted);
+      if (
+        parsed.date === todayStr &&
+        Date.now() - parsed.timestamp < TODAY_STATS_CACHE_TTL
+      ) {
+        todayStatsCache = parsed;
+        return parsed.stats;
+      }
+    }
+  } catch {
+    // ignore parse / storage errors and fall through to recompute
+  }
+
+  // Compute fresh.
+  const todaySessions = await listAllSessions({
+    afterDate: today,
+    includeInbox: false,
+  });
   const stats = await calculateStatsWithUsage(todaySessions, today);
 
-  // Update in-memory cache
-  todayStatsCache = {
-    stats,
-    timestamp: Date.now(),
-    date: todayStr,
-  };
+  todayStatsCache = { stats, timestamp: Date.now(), date: todayStr };
+  try {
+    await LocalStorage.setItem(
+      TODAY_STATS_LOCALSTORAGE_KEY,
+      JSON.stringify(todayStatsCache),
+    );
+  } catch {
+    // ignore storage errors
+  }
 
   return stats;
 }
@@ -161,9 +134,10 @@ export async function getWeekStats(): Promise<UsageStats> {
   weekAgo.setDate(weekAgo.getDate() - 7);
   weekAgo.setHours(0, 0, 0, 0);
 
-  // Only load sessions from the past week
-  const weekSessions = await listAllSessions({ afterDate: weekAgo });
-
+  const weekSessions = await listAllSessions({
+    afterDate: weekAgo,
+    includeInbox: false,
+  });
   return calculateStatsWithUsage(weekSessions, weekAgo);
 }
 
@@ -175,17 +149,19 @@ export async function getMonthStats(): Promise<UsageStats> {
   monthAgo.setMonth(monthAgo.getMonth() - 1);
   monthAgo.setHours(0, 0, 0, 0);
 
-  // Only load sessions from the past month
-  const monthSessions = await listAllSessions({ afterDate: monthAgo });
-
+  const monthSessions = await listAllSessions({
+    afterDate: monthAgo,
+    includeInbox: false,
+  });
   return calculateStatsWithUsage(monthSessions, monthAgo);
 }
 
 /**
- * Get all-time usage statistics (cached)
+ * Get all-time usage statistics (cached for 1 hour).
+ * No truncation: bounded streaming plus per-message processing keeps memory low
+ * even across thousands of sessions.
  */
 export async function getAllTimeStats(): Promise<UsageStats> {
-  // Check cache
   const cached = await LocalStorage.getItem<string>(STATS_CACHE_KEY);
   if (cached) {
     const cachedStats: CachedStats = JSON.parse(cached);
@@ -194,10 +170,9 @@ export async function getAllTimeStats(): Promise<UsageStats> {
     }
   }
 
-  const allSessions = await listAllSessions();
+  const allSessions = await listAllSessions({ includeInbox: false });
   const stats = await calculateStatsWithUsage(allSessions);
 
-  // Cache the result
   await LocalStorage.setItem(
     STATS_CACHE_KEY,
     JSON.stringify({
@@ -210,47 +185,56 @@ export async function getAllTimeStats(): Promise<UsageStats> {
 }
 
 /**
- * Invalidate the stats cache
- * Call this after creating/deleting sessions to ensure fresh data
+ * Invalidate the stats cache.
+ * Call this after creating/deleting sessions to ensure fresh data.
  */
 export async function invalidateStatsCache(): Promise<void> {
   await LocalStorage.removeItem(STATS_CACHE_KEY);
+  await LocalStorage.removeItem(TODAY_STATS_LOCALSTORAGE_KEY);
+  todayStatsCache = null;
 }
 
 /**
- * Get daily stats for the last N days
- * Optimized to only load sessions from the requested time range
+ * Get daily stats for the last N days.
+ * Buckets cost by per-entry timestamp (not file mtime), so a multi-day session
+ * gets its cost attributed to each day it was actually used on.
  */
 export async function getDailyStats(days: number = 7): Promise<DailyStats[]> {
-  // Calculate the earliest date we need
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days + 1);
   startDate.setHours(0, 0, 0, 0);
 
-  // Only load sessions from the requested period
-  const allSessions = await listAllSessions({ afterDate: startDate });
+  const allSessions = await listAllSessions({
+    afterDate: startDate,
+    includeInbox: false,
+  });
 
-  // Scan each session for usage within the date range
+  // Per-day map: dateStr → { unique session ids, summed cost }.
   const dailyMap = new Map<string, { sessions: Set<string>; cost: number }>();
 
   for (const session of allSessions) {
-    const usage = await streamSessionUsage(session.filePath, startDate);
-    const cost = calculateUsageCost(usage);
-    const dateStr = session.lastModified.toISOString().split("T")[0];
-    const existing = dailyMap.get(dateStr) || {
-      sessions: new Set<string>(),
-      cost: 0,
-    };
-    existing.sessions.add(session.id);
-    existing.cost += cost;
-    dailyMap.set(dateStr, existing);
+    const usage = await streamSessionUsage(session.filePath, startDate, {
+      bucketByDay: true,
+    });
+    if (!usage.dailyByDate) continue;
+    for (const [dateStr, msgs] of usage.dailyByDate) {
+      let entry = dailyMap.get(dateStr);
+      if (!entry) {
+        entry = { sessions: new Set<string>(), cost: 0 };
+        dailyMap.set(dateStr, entry);
+      }
+      entry.sessions.add(session.identity ?? session.filePath);
+      for (const m of msgs) {
+        entry.cost += calculateMessageCost(m);
+      }
+    }
   }
 
   const dailyStats: DailyStats[] = [];
   for (let i = 0; i < days; i++) {
     const date = new Date();
     date.setDate(date.getDate() - i);
-    const dateStr = date.toISOString().split("T")[0];
+    const dateStr = getLocalDateKey(date)!;
     const entry = dailyMap.get(dateStr);
     dailyStats.push({
       date: dateStr,
@@ -263,7 +247,11 @@ export async function getDailyStats(days: number = 7): Promise<DailyStats[]> {
 }
 
 /**
- * Calculate stats by streaming each session file for accurate token totals.
+ * Stream each session and aggregate tier-aware per-message cost.
+ * Does NOT mutate the input session array. Costs are tracked in a local Map
+ * and the lightweight TopSessionSummary projection is used for the returned
+ * topSessions list.
+ *
  * afterDate filters tokens to entries within the time range.
  */
 async function calculateStatsWithUsage(
@@ -277,11 +265,17 @@ async function calculateStatsWithUsage(
   let totalCacheCreationTokens = 0;
   const sessionsByProject: Record<string, { count: number; cost: number }> = {};
   const projectCostCents: Record<string, number> = {};
+  const sessionCosts = new Map<string, number>();
 
   for (const session of sessions) {
     const usage = await streamSessionUsage(session.filePath, afterDate);
-    const cost = calculateUsageCost(usage);
-    session.cost = cost;
+
+    // Tier-aware: sum per-message costs, not session-total costs.
+    let cost = 0;
+    for (const m of usage.messages) {
+      cost += calculateMessageCost(m);
+    }
+    sessionCosts.set(session.identity ?? session.filePath, cost);
 
     const costCents = Math.round(cost * 10000);
     totalCostCents += costCents;
@@ -303,7 +297,15 @@ async function calculateStatsWithUsage(
     sessionsByProject[projectName].cost = projectCostCents[projectName] / 10000;
   }
 
-  const topSessions = [...sessions]
+  // Lightweight projection only. Never retain full SessionMetadata refs
+  // inside the cached UsageStats (would alias the same memory across calls).
+  const topSessions: TopSessionSummary[] = sessions
+    .map((s) => ({
+      id: s.id,
+      projectName: s.projectName,
+      firstMessage: s.firstMessage,
+      cost: sessionCosts.get(s.identity ?? s.filePath) ?? 0,
+    }))
     .filter((s) => s.cost > 0)
     .sort((a, b) => b.cost - a.cost)
     .slice(0, 10);
@@ -341,7 +343,8 @@ export function formatTokens(count: number): string {
 }
 
 /**
- * Generate ASCII bar chart for daily costs
+ * Generate ASCII bar chart for daily costs (legacy fallback for any caller
+ * that still uses the markdown view)
  */
 export function generateCostChart(dailyStats: DailyStats[]): string {
   const maxCost = Math.max(...dailyStats.map((d) => d.cost), 0.01);
@@ -391,13 +394,25 @@ export function generateProjectTable(
  */
 export async function isClaudeActive(): Promise<boolean> {
   try {
-    const { exec } = await import("child_process");
-    const { promisify } = await import("util");
-    const execPromise = promisify(exec);
-
-    const { stdout } = await execPromise("pgrep -x claude || true");
-    return stdout.trim().length > 0;
+    if (isWindows()) {
+      const tasklist = path.win32.join(
+        process.env.SystemRoot || "C:\\Windows",
+        "System32",
+        "tasklist.exe",
+      );
+      const { stdout } = await execFilePromise(
+        tasklist,
+        ["/FI", "IMAGENAME eq claude.exe", "/FO", "CSV", "/NH"],
+        { windowsHide: true },
+      );
+      return stdout.toLowerCase().includes('"claude.exe"');
+    }
+    const { stdout } = await execFilePromise("pgrep", ["-x", "claude"]);
+    return Boolean(stdout.trim());
   } catch {
     return false;
   }
 }
+
+// Re-export for callers that still import the legacy single-cost helper.
+export { calculateUsageCost };

@@ -1,5 +1,21 @@
 # Messages 2FA Changelog
 
+## [Update contributors] - 2026-10-12
+
+- Move `ronaldheft` to past contributors.
+
+## [Fix codes read from CSS colours] - 2026-10-12
+
+- HTML-only emails no longer report a CSS colour such as `#999999` as the code: style, script and head blocks are dropped before the code is extracted ([#30102](https://github.com/raycast/extensions/issues/30102))
+
+## [Fix invalid verification links] - 2026-05-28
+
+- Ignore unsupported verification link URLs before rendering them in the list.
+
+## [Fix Time Sensitive iMessage codes] - 2026-05-27
+
+- Fixed iMessage code detection when macOS stores notification labels separately from the message body.
+
 ## [Update] - 2025-12-17
 
 - Add support for extracting text from binary data in iMessage messages

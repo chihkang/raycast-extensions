@@ -1,5 +1,17 @@
 # Raycast Weekly Newsletter Changelog
 
+## [Add Ask AI Raycast Command] - 2026-09-27
+
+- Added AI tools to list recent Raycast Weekly posts and read full posts.
+- Added YAML evals for finding and summarizing posts.
+- Updated the Raycast API dependency to version 2.5.2.
+
+## [Update Posts Loading and Cache] - 2026-05-06
+
+- Updated Raycast dependencies to the latest compatible versions.
+- Added paginated loading for older newsletter posts in the browse posts command.
+- Added a clear cache action with Raycast's common refresh shortcut.
+
 ## [Updates] - 2026-03-25
 
 ### Changed

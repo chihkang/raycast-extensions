@@ -1,3 +1,4 @@
+import { diagnostic } from "./diagnostics";
 type ErrorLike = Record<string, unknown>;
 
 const getString = (value: unknown): string | null => {
@@ -74,3 +75,19 @@ export const toError = (error: unknown, fallbackMessage = "Unknown error"): Erro
   const message = toErrorMessage(error);
   return new Error(message || fallbackMessage);
 };
+
+export type GranolaLogContext = Record<string, unknown>;
+
+export function logGranolaError(context: string, error: unknown, extra?: GranolaLogContext): void {
+  const status =
+    error && typeof error === "object" && "status" in error && typeof error.status === "number"
+      ? error.status
+      : undefined;
+  diagnostic("operation.failed", { operation: context, status, ...extra });
+}
+export function logGranolaWarn(context: string, extra?: GranolaLogContext): void {
+  diagnostic("operation.warning", { operation: context, ...extra });
+}
+export function logGranolaInfo(context: string, extra?: GranolaLogContext): void {
+  diagnostic("operation.info", { operation: context, ...extra });
+}

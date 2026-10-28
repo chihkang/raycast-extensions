@@ -1,71 +1,40 @@
-import { showHUD, showToast, Toast, LaunchProps } from "@raycast/api";
-import {
-  ensureLunarReady,
-  getDisplays,
-  getCursorDisplay,
-  getBrightnessForDisplay,
-  setBrightnessForDisplay,
-} from "./utils/lunar";
+import { getPreferenceValues, showToast, Toast, LaunchProps } from "@raycast/api";
+import { setBrightness } from "./utils/platform";
+import { showBrightnessFeedback } from "./utils/feedback";
 
 export default async function Command(props: LaunchProps<{ arguments: Arguments.SetBrightness }>) {
   const { level: levelArg } = props.arguments;
-
-  // Validate brightness level
+  const { closeRaycast = true, showDisplayName = true } = getPreferenceValues<Preferences.SetBrightness>();
   const brightnessLevel = parseInt(levelArg, 10);
 
   if (isNaN(brightnessLevel)) {
     await showToast({
       style: Toast.Style.Failure,
       title: "Invalid Input",
-      message: "Please enter a number between 1 and 100",
+      message: "Please enter a number between 0 and 100",
     });
     return;
   }
 
-  if (brightnessLevel < 1 || brightnessLevel > 100) {
+  if (brightnessLevel < 0 || brightnessLevel > 100) {
     await showToast({
       style: Toast.Style.Failure,
       title: "Out of Range",
-      message: "Brightness must be between 1 and 100",
+      message: "Brightness must be between 0 and 100",
     });
-    return;
-  }
-
-  if (!(await ensureLunarReady())) {
     return;
   }
 
   try {
-    const allDisplays = await getDisplays();
+    const result = await setBrightness(brightnessLevel);
+    if (!result) return;
 
-    if (allDisplays.length === 0) {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "No Displays Found",
-        message: "Make sure Lunar is running and displays are connected",
-      });
-      return;
-    }
-
-    // Auto-detect cursor display, fallback to main display
-    const cursorDisplaySerial = await getCursorDisplay();
-    let targetDisplay = allDisplays.find((d) => d.serial === cursorDisplaySerial);
-
-    if (!targetDisplay) {
-      targetDisplay = allDisplays.find((d) => d.main) || allDisplays[0];
-    }
-
-    // Get current brightness for the HUD message
-    const currentBrightness = await getBrightnessForDisplay(targetDisplay.serial);
-
-    await setBrightnessForDisplay(targetDisplay.serial, brightnessLevel, targetDisplay.adaptive);
-
-    // Show result
-    if (currentBrightness !== null) {
-      await showHUD(`${targetDisplay.name}: ${currentBrightness}% → ${brightnessLevel}%`);
-    } else {
-      await showHUD(`${targetDisplay.name}: Set to ${brightnessLevel}%`);
-    }
+    const currentBrightness = result.brightness ?? brightnessLevel;
+    const message =
+      showDisplayName && result.displayName && result.previousBrightness != null
+        ? `${result.displayName}: ${result.previousBrightness}% → ${currentBrightness}%`
+        : `Brightness set to ${currentBrightness}%`;
+    await showBrightnessFeedback(message, closeRaycast);
   } catch (error) {
     console.error("Failed to set brightness:", error);
     await showToast({

@@ -56,6 +56,8 @@ export function useBrowserLink() {
           return runAppleScript(`tell application "Google Chrome" to return URL of active tab of front window`);
         case "com.brave.Browser":
           return runAppleScript(`tell application "Brave Browser" to return URL of active tab of front window`);
+        case "net.imput.helium":
+          return runAppleScript(`tell application "Helium" to return URL of active tab of front window`);
         case "com.apple.Safari":
           return runAppleScript(`tell application "Safari" to return URL of front document`);
         case "com.kagi.kagimacOS":
@@ -96,9 +98,10 @@ export function useBrowserLink() {
           break;
       }
 
-      // Fallback for Vivaldi Browser not recognized by bundleId
-      if (app?.name === "Vivaldi.app") {
-        return runAppleScript(`tell application "Vivaldi" to return URL of active tab of front window`);
+      // Fallback for browsers whose bundleId is not recognized by Raycast API (Vivaldi + Arc)
+      if (app?.name === "Vivaldi.app" || app?.name === "Arc") {
+        const scriptName = app.name === "Arc" ? "Arc" : "Vivaldi";
+        return runAppleScript(`tell application "${scriptName}" to return URL of active tab of front window`);
       }
 
       throw new Error(`Unsupported App: ${app.name}`);

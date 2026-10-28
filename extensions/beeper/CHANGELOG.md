@@ -1,5 +1,13 @@
 # Beeper Changelog
 
+## [Bug Fix] - 2026-09-20
+
+- Switched authentication to Raycast's app redirect so Beeper accepts the OAuth callback
+
+## [Bug Fix] - 2026-05-18
+
+- Limited chat message loading to one page at a time to avoid memory pressure in large conversations
+
 ## [Windows Support] - 2026-04-13
 
 ### Added

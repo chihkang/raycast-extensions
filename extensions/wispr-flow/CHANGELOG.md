@@ -1,5 +1,31 @@
 # Wispr Flow Changelog
 
+## [Faster Search Transcripts] - 2026-09-29
+
+- Fixed Search Transcripts opening on the list from the previous run before showing current transcripts
+- Fixed a delay on open caused by the app filter query scanning every row, including stored audio
+- Fixed transcript rows showing the microphone icon before switching to their app icon
+
+## [Fix Transcript Selection on Open] - 2026-09-03
+
+- Fixed Search Transcripts restoring the previously viewed transcript as the selected row, leaving the highlight below newly recorded entries
+- Fixed the selection landing in the last date section under the Oldest First, Longest Duration, and Most Words sort orders
+- Fixed the selection anchoring to an archived transcript after it left the results
+
+## [Add Windows Support] - 2026-04-30
+
+### Platform Support
+- Added Windows
+- Added platform-specific handling for the default database path, app detection, and opening Wispr Flow commands
+
+### Database and Commands
+- Updated write operations to use the shared async SQL helper
+- Updated add, edit, delete, and archive actions to await database writes before refreshing UI state
+- Updated start recording, stop recording, and open app commands to use the shared Wispr Flow opener
+
+### Maintenance
+- Updated Raycast and TypeScript-related dependencies
+
 ## [Update] - 2026-04-22
 
 ### Voice Control

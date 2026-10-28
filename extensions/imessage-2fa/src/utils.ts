@@ -97,6 +97,8 @@ export function stripHtmlTags(html: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'");
 
+  // Drop style, script and head blocks and comments whole, so CSS such as `color: #999999` is not read as a code
+  text = text.replace(/<(style|script|head)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "").replace(/<!--[\s\S]*?-->/g, "");
   // Replace <br> tags with newlines for better readability
   text = text.replace(/<br\s*\/?>/gi, "\n");
   // Remove all other HTML tags
@@ -148,6 +150,15 @@ function fixQuotedPrintableUrl(url: string): string {
       return `=${hex}`; // Keep original if parsing fails
     }
   });
+}
+
+function isSupportedUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -254,6 +265,7 @@ export function extractVerificationLink(message: string): { url: string; type: "
 
       // Skip ignored URLs
       if (ignoreUrls.includes(rawUrl)) continue;
+      if (!isSupportedUrl(rawUrl)) continue;
 
       const linkText = stripHtmlTags(match[3]).toLowerCase(); // Cleaned text inside the tag
       const lowerUrl = rawUrl.toLowerCase();
@@ -340,6 +352,7 @@ export function extractVerificationLink(message: string): { url: string; type: "
 
     // Skip ignored URLs
     if (ignoreUrls.some((ignore) => rawUrl.startsWith(ignore))) continue;
+    if (!isSupportedUrl(rawUrl)) continue;
 
     // Check for verification/sign-in keywords *within the URL itself*
     let type: "verification" | "sign-in" | "unknown" = "unknown";

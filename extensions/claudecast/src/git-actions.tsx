@@ -11,19 +11,27 @@ import {
   useNavigation,
 } from "@raycast/api";
 import { useState, useEffect } from "react";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
-import { captureContext, CapturedContext } from "./lib/context-capture";
 import {
   executePrompt,
   ClaudeResponse,
+  ensureClaudeApiAuth,
   ensureClaudeInstalled,
 } from "./lib/claude-cli";
+import {
+  getAllProjects,
+  Project,
+  addRecentProject,
+} from "./lib/project-discovery";
 import { launchClaudeCode } from "./lib/terminal";
+import { shortcut } from "./lib/shortcuts";
+import { isWindows } from "./lib/platform";
+import { getWindowsEnvironment } from "./lib/windows-runtime";
 
-const execPromise = promisify(exec);
+const execFilePromise = promisify(execFile);
 
-// Enum for explicit change requirements (more robust than string matching)
+// Explicit values keep behavior independent from action-title wording.
 type ChangeRequirement = "staged" | "unstaged" | "any" | "none";
 
 interface GitAction {
@@ -32,7 +40,7 @@ interface GitAction {
   subtitle: string;
   icon: Icon;
   prompt: string;
-  gitCommand: string;
+  gitArgs: string[];
   /** What type of changes this action requires */
   changeRequirement: ChangeRequirement;
   tintColor?: Color;
@@ -46,7 +54,7 @@ const GIT_ACTIONS: GitAction[] = [
     icon: Icon.MagnifyingGlass,
     prompt:
       "Review these staged changes. Look for bugs, potential issues, code quality concerns, and suggest improvements. Be specific about file names and line numbers.",
-    gitCommand: "git diff --staged",
+    gitArgs: ["diff", "--staged"],
     changeRequirement: "staged",
     tintColor: Color.Blue,
   },
@@ -68,7 +76,7 @@ Rules:
 - Be specific about what changed and why
 
 Return ONLY the commit message, nothing else.`,
-    gitCommand: "git diff --staged",
+    gitArgs: ["diff", "--staged"],
     changeRequirement: "staged",
     tintColor: Color.Green,
   },
@@ -79,7 +87,7 @@ Return ONLY the commit message, nothing else.`,
     icon: Icon.QuestionMark,
     prompt:
       "Explain these changes in plain English. What was changed, why it might have been changed, and what effect it has. Be concise but thorough.",
-    gitCommand: "git diff HEAD~1",
+    gitArgs: ["diff", "HEAD~1"],
     changeRequirement: "none",
     tintColor: Color.Purple,
   },
@@ -90,7 +98,7 @@ Return ONLY the commit message, nothing else.`,
     icon: Icon.Eye,
     prompt:
       "Review these unstaged changes. Identify any issues, suggest improvements, and note anything that looks incomplete or problematic.",
-    gitCommand: "git diff",
+    gitArgs: ["diff"],
     changeRequirement: "unstaged",
     tintColor: Color.Orange,
   },
@@ -101,7 +109,7 @@ Return ONLY the commit message, nothing else.`,
     icon: Icon.List,
     prompt:
       "Summarize all the changes on this branch compared to main. Group by feature/area, highlight key changes, and provide a high-level overview suitable for a PR description.",
-    gitCommand: "git diff main...HEAD",
+    gitArgs: ["diff", "main...HEAD"],
     changeRequirement: "none",
     tintColor: Color.Yellow,
   },
@@ -109,7 +117,96 @@ Return ONLY the commit message, nothing else.`,
 
 export default function GitActions() {
   const [isLoading, setIsLoading] = useState(true);
-  const [context, setContext] = useState<CapturedContext | null>(null);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [authReady, setAuthReady] = useState(false);
+
+  useEffect(() => {
+    async function init() {
+      if (!(await ensureClaudeInstalled())) {
+        setIsLoading(false);
+        return;
+      }
+      if (!(await ensureClaudeApiAuth())) {
+        setIsLoading(false);
+        return;
+      }
+      setAuthReady(true);
+
+      const { favorites, recent, all } = await getAllProjects();
+      const seen = new Set<string>();
+      const ordered: Project[] = [];
+      for (const p of [...favorites, ...recent, ...all]) {
+        if (seen.has(p.path)) continue;
+        seen.add(p.path);
+        ordered.push(p);
+      }
+      setProjects(ordered);
+      setIsLoading(false);
+    }
+    init();
+  }, []);
+
+  if (!authReady && !isLoading) {
+    return null; // ensureClaudeApiAuth already showed a toast
+  }
+
+  return (
+    <List
+      isLoading={isLoading}
+      searchBarPlaceholder="Pick a project to run git actions on..."
+    >
+      {projects.length === 0 && !isLoading && (
+        <List.EmptyView
+          title="No Claude Code Projects Found"
+          description="Run Claude Code in any project first; recent projects appear here."
+          icon={Icon.Folder}
+        />
+      )}
+      {projects.map((p) => (
+        <ProjectPickerItem key={p.path} project={p} />
+      ))}
+    </List>
+  );
+}
+
+function ProjectPickerItem({ project }: { project: Project }) {
+  const accessories: List.Item.Accessory[] = [];
+  if (project.isFavorite) {
+    accessories.push({
+      icon: { source: Icon.Star, tintColor: Color.Yellow },
+      tooltip: "Favorite",
+    });
+  }
+  if (project.lastAccessed) {
+    accessories.push({ date: project.lastAccessed });
+  }
+  return (
+    <List.Item
+      title={project.name}
+      subtitle={project.path}
+      icon={Icon.Folder}
+      accessories={accessories}
+      actions={
+        <ActionPanel>
+          <Action.Push
+            title="Open Git Actions"
+            icon={Icon.MagnifyingGlass}
+            target={<GitActionsForProject projectPath={project.path} />}
+            onPush={() => addRecentProject(project.path)}
+          />
+          <Action.CopyToClipboard
+            title="Copy Project Path"
+            content={project.path}
+            shortcut={shortcut.copy}
+          />
+        </ActionPanel>
+      }
+    />
+  );
+}
+
+function GitActionsForProject({ projectPath }: { projectPath: string }) {
+  const [isLoading, setIsLoading] = useState(true);
   const [gitStatus, setGitStatus] = useState<{
     hasStagedChanges: boolean;
     hasUnstagedChanges: boolean;
@@ -118,44 +215,24 @@ export default function GitActions() {
   } | null>(null);
 
   useEffect(() => {
-    async function init() {
-      // Check if Claude is installed first
-      const claudeInstalled = await ensureClaudeInstalled();
-      if (!claudeInstalled) {
-        setIsLoading(false);
-        return;
-      }
-
-      const ctx = await captureContext();
-      setContext(ctx);
-
-      if (ctx.projectPath) {
-        const status = await checkGitStatus(ctx.projectPath);
-        setGitStatus(status);
-      } else {
-        setGitStatus({
-          hasStagedChanges: false,
-          hasUnstagedChanges: false,
-          branch: "",
-          isGitRepo: false,
-        });
-      }
-
+    async function load() {
+      const status = await checkGitStatus(projectPath);
+      setGitStatus(status);
       setIsLoading(false);
     }
-    init();
-  }, []);
+    load();
+  }, [projectPath]);
 
   if (isLoading) {
     return <List isLoading={true} />;
   }
 
-  if (!context?.projectPath || !gitStatus?.isGitRepo) {
+  if (!gitStatus?.isGitRepo) {
     return (
       <List>
         <List.EmptyView
-          title="No Git Repository Detected"
-          description="Open a project in VS Code or navigate to a git repository to use Git Actions"
+          title="Not a Git Repository"
+          description={`${projectPath} has no .git directory. Pick a different project.`}
           icon={Icon.ExclamationMark}
         />
       </List>
@@ -165,11 +242,10 @@ export default function GitActions() {
   return (
     <List searchBarPlaceholder="Search git actions...">
       <List.Section
-        title={`${context.projectPath}`}
+        title={projectPath}
         subtitle={gitStatus.branch ? `on ${gitStatus.branch}` : undefined}
       >
         {GIT_ACTIONS.map((action) => {
-          // Check if action is disabled based on explicit change requirement
           let isDisabled = false;
           let disabledReason: string | undefined;
 
@@ -196,7 +272,6 @@ export default function GitActions() {
               }
               break;
             case "none":
-              // No changes required
               break;
           }
 
@@ -204,7 +279,7 @@ export default function GitActions() {
             <GitActionItem
               key={action.id}
               action={action}
-              projectPath={context.projectPath!}
+              projectPath={projectPath}
               isDisabled={isDisabled}
               disabledReason={disabledReason}
             />
@@ -247,29 +322,44 @@ function GitActionItem({
       });
 
       // Get the git diff
-      const { stdout: diff } = await execPromise(action.gitCommand, {
+      const env = isWindows() ? await getWindowsEnvironment() : process.env;
+      const { stdout: diff } = await execFilePromise("git", action.gitArgs, {
         cwd: projectPath,
+        env,
+        windowsHide: true,
       });
 
       if (!diff.trim() && action.changeRequirement !== "none") {
         await showToast({
           style: Toast.Style.Failure,
           title: "No changes found",
-          message: `${action.gitCommand} returned empty`,
+          message: `git ${action.gitArgs.join(" ")} returned empty`,
         });
         setIsExecuting(false);
         return;
       }
 
+      const diffKB = Math.round(Buffer.byteLength(diff, "utf8") / 1024);
       await showToast({
         style: Toast.Style.Animated,
         title: "Asking Claude Code...",
+        message:
+          diffKB > 50
+            ? `Large diff (${diffKB} KB). This may take a few minutes.`
+            : undefined,
       });
 
-      // Send to Claude
+      // Scale timeout with diff size: ~30s per 50KB, min 3 min, max 15 min.
+      // Reviews of multi-hundred-KB diffs can legitimately take 5-10 min.
+      const timeoutMs = Math.min(
+        15 * 60 * 1000,
+        Math.max(3 * 60 * 1000, Math.ceil(diffKB / 50) * 30 * 1000),
+      );
+
       const response = await executePrompt(action.prompt, {
         context: `Git diff output:\n\`\`\`diff\n${diff}\n\`\`\``,
         cwd: projectPath,
+        timeoutMs,
       });
 
       await showToast({ style: Toast.Style.Success, title: "Done" });
@@ -316,7 +406,7 @@ function GitActionItem({
           <Action
             title="Open Full Session"
             icon={Icon.Terminal}
-            shortcut={{ modifiers: ["cmd"], key: "o" }}
+            shortcut={shortcut.open}
             onAction={async () => {
               await launchClaudeCode({ projectPath });
               await popToRoot();
@@ -347,10 +437,11 @@ function GitActionResult({
         title: "Creating commit...",
       });
 
-      // Escape the message for shell
-      const escapedMessage = result.result.replace(/'/g, "'\\''");
-      await execPromise(`git commit -m '${escapedMessage}'`, {
+      const env = isWindows() ? await getWindowsEnvironment() : process.env;
+      await execFilePromise("git", ["commit", "-m", result.result], {
         cwd: projectPath,
+        env,
+        windowsHide: true,
       });
 
       await showToast({ style: Toast.Style.Success, title: "Commit created!" });
@@ -391,20 +482,20 @@ function GitActionResult({
             <Action.CopyToClipboard
               title="Copy Result"
               content={result.result}
-              shortcut={{ modifiers: ["cmd"], key: "c" }}
+              shortcut={shortcut.copy}
             />
             {isCommitMessage && (
               <Action
                 title="Create Commit"
                 icon={Icon.Checkmark}
-                shortcut={{ modifiers: ["cmd"], key: "return" }}
+                shortcut={shortcut.primary("return")}
                 onAction={handleCommit}
               />
             )}
             <Action.Paste
               title="Paste Result"
               content={result.result}
-              shortcut={{ modifiers: ["cmd", "shift"], key: "v" }}
+              shortcut={shortcut.primaryShift("v")}
             />
           </ActionPanel.Section>
 
@@ -412,13 +503,13 @@ function GitActionResult({
             <Action
               title="Back to Actions"
               icon={Icon.ArrowLeft}
-              shortcut={{ modifiers: ["cmd"], key: "[" }}
+              shortcut={shortcut.primary("[")}
               onAction={pop}
             />
             <Action
               title="Continue in Terminal"
               icon={Icon.Terminal}
-              shortcut={{ modifiers: ["cmd"], key: "t" }}
+              shortcut={shortcut.primary("t")}
               onAction={async () => {
                 await launchClaudeCode({
                   projectPath,
@@ -441,19 +532,30 @@ async function checkGitStatus(projectPath: string): Promise<{
   isGitRepo: boolean;
 }> {
   try {
+    const env = isWindows() ? await getWindowsEnvironment() : process.env;
     // Check if it's a git repo
-    await execPromise("git rev-parse --git-dir", { cwd: projectPath });
+    await execFilePromise("git", ["rev-parse", "--git-dir"], {
+      cwd: projectPath,
+      env,
+      windowsHide: true,
+    });
 
     const [staged, unstaged, branch] = await Promise.all([
-      execPromise("git diff --staged --stat", { cwd: projectPath }).catch(
-        () => ({ stdout: "" }),
-      ),
-      execPromise("git diff --stat", { cwd: projectPath }).catch(() => ({
-        stdout: "",
-      })),
-      execPromise("git branch --show-current", { cwd: projectPath }).catch(
-        () => ({ stdout: "" }),
-      ),
+      execFilePromise("git", ["diff", "--staged", "--stat"], {
+        cwd: projectPath,
+        env,
+        windowsHide: true,
+      }).catch(() => ({ stdout: "" })),
+      execFilePromise("git", ["diff", "--stat"], {
+        cwd: projectPath,
+        env,
+        windowsHide: true,
+      }).catch(() => ({ stdout: "" })),
+      execFilePromise("git", ["branch", "--show-current"], {
+        cwd: projectPath,
+        env,
+        windowsHide: true,
+      }).catch(() => ({ stdout: "" })),
     ]);
 
     return {

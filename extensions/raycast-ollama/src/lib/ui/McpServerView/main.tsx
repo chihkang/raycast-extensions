@@ -1,7 +1,7 @@
 import { Action, ActionPanel, Icon, List } from "@raycast/api";
 import { useLocalStorage } from "@raycast/utils";
 import * as React from "react";
-import { McpServerConfig } from "../../mcp/types";
+import { McpServerConfig } from "../types";
 import { McpServerFormConfig } from "./form/config";
 import { DeleteMcpServer, GetMcpServerConfig } from "./function";
 import { Shortcut } from "../shortcut";
@@ -55,7 +55,7 @@ export function McpServerView(): React.JSX.Element {
           {props.mcpServerName && McpServer && (
             <ActionPanel.Submenu title="Delete" icon={Icon.Trash} shortcut={Shortcut.Remove}>
               <Action
-                title={`Yes, Delete "${props.mcpServerName}" Mcp Server`}
+                title={`Yes, Delete "${props.mcpServerName}" MCP Server`}
                 icon={Icon.CheckCircle}
                 onAction={async () => {
                   await DeleteMcpServer(props.mcpServerName as string, McpServer, setMcpServer);

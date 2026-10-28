@@ -1,10 +1,11 @@
+import getAccessToken from "../utils/getAccessToken";
 import { showFailureToast } from "@raycast/utils";
 import { getRecipesFromApi } from "../utils/fetchData";
 import { RecipesListResult, Recipe, DefaultRecipe } from "../utils/types";
 import { toError } from "../utils/errorUtils";
 
 type ListInput = {
-  action?: "list" | "get" | "search";
+  action?: "list" | "get" | "search" | "usage";
   slug?: string;
   query?: string;
 };
@@ -27,16 +28,35 @@ function findRecipeBySlug(recipes: Recipe[], slug: string): Recipe | undefined {
 }
 
 export default async function tool(input: ListInput = {}): Promise<Recipe[] | Recipe | ListResult | []> {
+  await getAccessToken();
+  return runRecipesTool(input);
+}
+
+async function runRecipesTool(input: ListInput = {}): Promise<Recipe[] | Recipe | ListResult | []> {
   const action = input.action ?? "list";
 
   try {
-    const { featureEnabled, userRecipes, defaultRecipes, sharedRecipes, unlistedRecipes } = await getRecipesFromApi();
+    const { featureEnabled, userRecipes, defaultRecipes, sharedRecipes, unlistedRecipes, recipesUsage } =
+      await getRecipesFromApi();
 
     const normalizeDefaultRecipes = (defaults?: DefaultRecipe[]): Recipe[] =>
       (defaults || []).map((d) => ({ slug: d.slug, config: d.defaultConfig }));
 
     if (action === "list") {
-      return { featureEnabled, userRecipes, defaultRecipes, sharedRecipes, unlistedRecipes };
+      return { featureEnabled, userRecipes, defaultRecipes, sharedRecipes, unlistedRecipes, recipesUsage };
+    }
+
+    if (action === "usage") {
+      return {
+        featureEnabled,
+        recipesUsage: recipesUsage ?? {},
+        recipeCount: {
+          user: userRecipes.length,
+          default: defaultRecipes?.length ?? 0,
+          shared: sharedRecipes?.length ?? 0,
+          unlisted: unlistedRecipes?.length ?? 0,
+        },
+      } as unknown as ListResult;
     }
 
     if (action === "get") {

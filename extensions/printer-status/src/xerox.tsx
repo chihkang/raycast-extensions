@@ -1,13 +1,35 @@
 import { List, Icon, ActionPanel, Action, getPreferenceValues } from "@raycast/api";
 import { showFailureToast } from "@raycast/utils";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { fetchPrinterStats, PrinterStats } from "./snmp-client";
-import { INK_COLORS, LABELS } from "./constants";
+import { getOidConfig, INK_COLORS, LABELS } from "./constants";
 
 export default function Command() {
   const preferences = getPreferenceValues<Preferences>();
   const host = preferences.printerIp;
   const community = preferences.snmpCommunity || "public";
+  const oidConfig = useMemo(
+    () => getOidConfig(preferences),
+    [
+      preferences.totalPagesOid,
+      preferences.blackPagesOid,
+      preferences.colorPagesOid,
+      preferences.supplyDescriptionBaseOid,
+      preferences.supplyMaxCapacityBaseOid,
+      preferences.supplyLevelBaseOid,
+      preferences.modelNameOid,
+      preferences.serialNumberOid,
+      preferences.printerNameOid,
+      preferences.wasteTonerBottleOid,
+      preferences.wasteTonerBottleMaxCapacityOid,
+      preferences.uptimeOid,
+      preferences.printerGeneralStatusOid,
+      preferences.printerStatusOid,
+      preferences.displayMessage2Oid,
+      preferences.displayMessage3Oid,
+      preferences.displayMessage4Oid,
+    ],
+  );
   const labels = LABELS;
 
   const [stats, setStats] = useState<PrinterStats | null>(null);
@@ -25,7 +47,7 @@ export default function Command() {
       }
 
       try {
-        const data = await fetchPrinterStats(host, community);
+        const data = await fetchPrinterStats(host, community, oidConfig);
         // avoid updating state if component unmounted
         if (signal && signal.aborted) return;
         setStats(data);
@@ -40,7 +62,7 @@ export default function Command() {
         }
       }
     },
-    [host, community],
+    [host, community, oidConfig],
   );
 
   useEffect(() => {
@@ -68,23 +90,52 @@ export default function Command() {
 
   return (
     <List isLoading={isLoading}>
-      <List.Section title={labels.sectionGeneral}>
-        {stats?.printerStatus && (
+      <List.Section title={labels.sectionStatus}>
+        {stats?.printerGeneralStatus && (
           <List.Item
-            title={labels.status}
-            subtitle={stats.printerStatus}
+            title={labels.generalStatus}
+            subtitle={stats.printerGeneralStatus}
             icon={
-              stats.printerStatus.toLowerCase().includes("error") || stats.printerStatus.toLowerCase().includes("jam")
+              stats.printerGeneralStatus.toLowerCase().includes("error") ||
+              stats.printerGeneralStatus.toLowerCase().includes("jam")
                 ? { source: Icon.Warning, tintColor: "red" }
                 : { source: Icon.CheckCircle, tintColor: "green" }
             }
             actions={
               <ActionPanel>
-                <Action.CopyToClipboard content={stats.printerStatus} title={labels.copyStatus} />
+                <Action.CopyToClipboard content={stats.printerGeneralStatus} title={labels.copyGeneralStatus} />
               </ActionPanel>
             }
           />
         )}
+        {stats?.wasteTonerBottle && (
+          <List.Item
+            title={labels.wasteTonerBottle}
+            subtitle={stats.wasteTonerBottle}
+            icon={Icon.Tag}
+            actions={
+              <ActionPanel>
+                <Action.CopyToClipboard content={stats.wasteTonerBottle} title={labels.copyWasteTonerBottle} />
+              </ActionPanel>
+            }
+          />
+        )}
+        {stats?.displayMessages.map(({ line, message }) => (
+          <List.Item
+            key={`${line}-${message}`}
+            title={`${labels.displayMessage} ${line}`}
+            subtitle={message}
+            icon={Icon.Monitor}
+            actions={
+              <ActionPanel>
+                <Action.CopyToClipboard content={message} title={labels.copyDisplayMessage} />
+              </ActionPanel>
+            }
+          />
+        ))}
+      </List.Section>
+
+      <List.Section title={labels.sectionGeneral}>
         <List.Item
           title={labels.ipAddress}
           subtitle={host}
@@ -96,6 +147,18 @@ export default function Command() {
             </ActionPanel>
           }
         />
+        {stats?.uptime && (
+          <List.Item
+            title={labels.uptime}
+            subtitle={stats.uptime}
+            icon={Icon.Clock}
+            actions={
+              <ActionPanel>
+                <Action.CopyToClipboard content={stats.uptime} title={labels.copyUptime} />
+              </ActionPanel>
+            }
+          />
+        )}
         {stats?.printerName && (
           <List.Item
             title={labels.networkName}

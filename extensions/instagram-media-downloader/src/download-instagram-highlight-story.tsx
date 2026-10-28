@@ -1,19 +1,27 @@
-import { useState, useEffect } from "react";
 import {
+  Action,
+  ActionPanel,
+  Grid,
+  Icon,
   LaunchProps,
   Toast,
-  showToast,
   getPreferenceValues,
   popToRoot,
-  Grid,
-  ActionPanel,
-  Action,
-  Icon,
+  showToast,
 } from "@raycast/api";
-import { getInstagramHighlightStoryURL, handleDownload } from "./download-media";
+import { existsSync, writeFileSync } from "fs";
 import { homedir } from "os";
-import { writeFileSync, existsSync } from "fs";
 import { join } from "path";
+import { useEffect, useState } from "react";
+import {
+  downloadMediaSet,
+  getInstagramHighlightStoryURL,
+  handleDownload,
+  mediaExtensionAndId,
+  runExclusive,
+  showErrorToast,
+} from "./download-media";
+import { countOf } from "./media-files";
 
 function getUniqueFilePath(folder: string, baseName: string, extension: string): string {
   let filePath = join(folder, `${baseName}${extension}`);
@@ -62,31 +70,20 @@ export default function Command({
     const selectedItems = highlightUrls.filter((item) => selectedUrls.has(item.url));
     if (selectedItems.length === 0) return;
 
-    await showToast({
-      title: "Downloading",
-      message: `Downloading ${selectedItems.length} item(s)...`,
-      style: Toast.Style.Animated,
-    });
-
     try {
-      for (const item of selectedItems) {
-        const mediaExtension = item.url.includes(".jpg") ? ".jpg" : ".mp4";
-        const fileId = item.url.includes(".jpg")
-          ? item.url.split(".jpg")[0].split("/").pop()
-          : item.url.split(".mp4")[0].split("/").pop();
-        await handleDownload(item.url, fileId || "instagram-story", downloadFolder, mediaExtension);
-      }
-      await showToast({
-        title: "Success",
-        message: `Downloaded ${selectedItems.length} item(s)`,
-        style: Toast.Style.Success,
-      });
+      await runExclusive(() =>
+        downloadMediaSet(
+          selectedItems.map((item) => ({
+            url: item.url,
+            name: mediaExtensionAndId(item.url).fileId || "instagram-story",
+          })),
+          downloadFolder,
+          "Story",
+        ),
+      );
     } catch (error) {
-      await showToast({
-        title: "Error",
-        message: error instanceof Error ? error.message : "Unknown error occurred",
-        style: Toast.Style.Failure,
-      });
+      const message = error instanceof Error ? error.message : "Unknown error occurred";
+      await showErrorToast("Error", message);
     }
   };
 
@@ -99,27 +96,20 @@ export default function Command({
       writeFileSync(filePath, JSON.stringify(selectedItems, null, 2));
       await showToast({
         title: "Success",
-        message: `Saved ${selectedItems.length} URL(s) to ${filePath}`,
+        message: `Saved ${countOf(selectedItems.length, "URL")} to ${filePath}`,
         style: Toast.Style.Success,
       });
     } catch (error) {
-      await showToast({
-        title: "Error",
-        message: error instanceof Error ? error.message : "Unknown error occurred",
-        style: Toast.Style.Failure,
-      });
+      const message = error instanceof Error ? error.message : "Unknown error occurred";
+      await showErrorToast("Error", message);
     }
   };
 
   useEffect(() => {
     const fetchHighlightStory = async () => {
       if (!instagramUrl.includes("instagram.com")) {
-        popToRoot();
-        await showToast({
-          title: "Error",
-          message: "Invalid URL provided. Please provide a valid instagram URL",
-          style: Toast.Style.Failure,
-        });
+        await popToRoot();
+        await showErrorToast("Error", "Invalid URL provided. Please provide a valid instagram URL");
         return;
       }
 
@@ -128,38 +118,33 @@ export default function Command({
         const pathParts = parsedUrl.pathname.replace(/^\/+|\/+$/g, "").split("/");
 
         if (pathParts.length !== 3 || pathParts[0] !== "stories" || pathParts[1] !== "highlights") {
-          popToRoot();
-          await showToast({
-            title: "Error",
-            message: "Invalid Instagram highlight story URL format.",
-            style: Toast.Style.Failure,
-          });
+          await popToRoot();
+          await showErrorToast("Error", "Invalid Instagram highlight story URL format.");
           return;
         }
 
-        const highlightUrls = await getInstagramHighlightStoryURL(instagramUrl);
+        const fetchedUrls = await getInstagramHighlightStoryURL(instagramUrl);
 
-        if (highlightUrls.length === 0) {
-          popToRoot();
-          await showToast({
-            title: "Error",
-            message: "No highlight story found at the provided URL",
-            style: Toast.Style.Failure,
-          });
+        if (fetchedUrls === null) {
+          // Helper already showed a failure toast.
+          await popToRoot();
           return;
         }
 
-        highlightUrls.reverse();
+        if (fetchedUrls.length === 0) {
+          await popToRoot();
+          await showErrorToast("Error", "No highlight story found at the provided URL");
+          return;
+        }
 
-        setHighlightUrls(highlightUrls);
+        fetchedUrls.reverse();
+
+        setHighlightUrls(fetchedUrls);
         setIsLoading(false);
       } catch (error) {
-        popToRoot();
-        await showToast({
-          title: "Error",
-          message: error instanceof Error ? error.message : "Unknown error occurred",
-          style: Toast.Style.Failure,
-        });
+        await popToRoot();
+        const message = error instanceof Error ? error.message : "Unknown error occurred";
+        await showErrorToast("Error", message);
       }
     };
 
@@ -234,17 +219,13 @@ export default function Command({
                     icon={Icon.Download}
                     onAction={async () => {
                       try {
-                        const mediaExtension = item.url.includes(".jpg") ? ".jpg" : ".mp4";
-                        const fileId = item.url.includes(".jpg")
-                          ? item.url.split(".jpg")[0].split("/").pop()
-                          : item.url.split(".mp4")[0].split("/").pop();
-                        await handleDownload(item.url, fileId || "instagram-story", downloadFolder, mediaExtension);
+                        const { fileId } = mediaExtensionAndId(item.url);
+                        await runExclusive(() =>
+                          handleDownload(item.url, fileId || "instagram-story", downloadFolder, "Story"),
+                        );
                       } catch (error) {
-                        await showToast({
-                          title: "Error",
-                          message: error instanceof Error ? error.message : "Unknown error occurred",
-                          style: Toast.Style.Failure,
-                        });
+                        const message = error instanceof Error ? error.message : "Unknown error occurred";
+                        await showErrorToast("Error", message);
                       }
                     }}
                     shortcut={{
@@ -265,11 +246,8 @@ export default function Command({
                           style: Toast.Style.Success,
                         });
                       } catch (error) {
-                        await showToast({
-                          title: "Error",
-                          message: error instanceof Error ? error.message : "Unknown error occurred",
-                          style: Toast.Style.Failure,
-                        });
+                        const message = error instanceof Error ? error.message : "Unknown error occurred";
+                        await showErrorToast("Error", message);
                       }
                     }}
                     shortcut={{

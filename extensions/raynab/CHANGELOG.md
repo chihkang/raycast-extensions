@@ -1,5 +1,17 @@
 # Raynab Changelog
 
+## [Optional Payee] - 2026-10-07
+
+### ✨ New Features
+
+- Payee is now optional when creating or scheduling a transaction
+- Added a "No Payee" option to the payee dropdown
+- The Add Transaction AI tool no longer requires a payee
+
+## [Security Maintenance] - 2026-05-21
+
+- Updated the extension to address security advisories.
+
 ## [Security: Refresh Lockfile] - 2026-03-27
 
 ### 🔧 Technical Updates

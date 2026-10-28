@@ -68,10 +68,19 @@ type FileData = {
   parents: string[];
 };
 
+type DriveFilesResponse = {
+  files?: File[];
+  error?: {
+    message?: string;
+  };
+};
+
 // For the whole list of properties, look at: https://developers.google.com/drive/api/reference/rest/v3/files
 
-const EXTENSION_SEARCH_PARAMS =
-  "files(id, name, mimeType, webViewLink, webContentLink, size, modifiedTime, createdTime, modifiedByMeTime, viewedByMeTime, sharedWithMeTime, lastModifyingUser(displayName,emailAddress), owners(displayName,emailAddress), shared, copyRequiresWriterPermission, imageMediaMetadata(width,height,cameraMake,cameraModel,time,location), videoMediaMetadata(width,height,durationMillis), thumbnailLink, starred, capabilities(canTrash), parents)";
+const FILE_FIELDS =
+  "id, name, mimeType, webViewLink, webContentLink, size, modifiedTime, createdTime, modifiedByMeTime, viewedByMeTime, sharedWithMeTime, lastModifyingUser(displayName,emailAddress), owners(displayName,emailAddress), shared, copyRequiresWriterPermission, imageMediaMetadata(width,height,cameraMake,cameraModel,time,location), videoMediaMetadata(width,height,durationMillis), thumbnailLink, starred, capabilities(canTrash), parents";
+
+const EXTENSION_SEARCH_PARAMS = `files(${FILE_FIELDS})`;
 
 const AI_EXTENSION_SEARCH_PARAMS =
   "files(id, name, mimeType, webViewLink, webContentLink, size, modifiedTime, thumbnailLink, starred, capabilities(canTrash), parents, " +
@@ -172,7 +181,15 @@ async function baseGetFiles(params: StandardGetFilesParams | AIGetFilesParams) {
       Authorization: `Bearer ${getOAuthToken()}`,
     },
   });
-  const data = (await response.json()) as { files: File[] };
+  const data = (await response.json()) as DriveFilesResponse;
+
+  if (!response.ok) {
+    throw new Error(data.error?.message ?? `Google Drive request failed: ${response.status} ${response.statusText}`);
+  }
+
+  if (!Array.isArray(data.files)) {
+    throw new Error(data.error?.message ?? "Google Drive response did not include files.");
+  }
 
   const { displayFilePath } = getPreferenceValues<Preferences>();
   if (displayFilePath) {
@@ -183,12 +200,39 @@ async function baseGetFiles(params: StandardGetFilesParams | AIGetFilesParams) {
     );
   }
 
-  return data;
+  return data as DriveFilesResponse & { files: File[] };
 }
 
 // Standard search using predefined query types
 export async function getFiles(params: StandardGetFilesParams) {
   return baseGetFiles(params);
+}
+
+// Extracts the file or folder ID from a Google Drive/Docs link
+export function getFileIdFromLink(text: string): string | undefined {
+  try {
+    const url = new URL(text.trim());
+    if (!url.hostname.endsWith(".google.com")) return undefined;
+    return url.pathname.match(/\/(?:d|folders)\/([\w-]+)/)?.[1] ?? url.searchParams.get("id") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function getFileById(fileId: string): Promise<File> {
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?${new URLSearchParams({ fields: FILE_FIELDS, supportsAllDrives: "true" })}`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${getOAuthToken()}` } });
+  const data = (await response.json()) as File & DriveFilesResponse;
+
+  if (!response.ok) {
+    throw new Error(data.error?.message ?? `Google Drive request failed: ${response.status} ${response.statusText}`);
+  }
+
+  if (getPreferenceValues<Preferences>().displayFilePath) {
+    data.filePath = await getFilePath(data.id);
+  }
+
+  return data;
 }
 
 async function getFilePath(fileId: string): Promise<string> {

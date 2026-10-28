@@ -45,8 +45,12 @@ const formatDate = (value?: string): string => {
   return date.toLocaleDateString();
 };
 
-export default function Command() {
-  const { noteData, isLoading, hasError } = useGranolaData();
+import { withGranolaAuth } from "./utils/withGranolaAuth";
+
+export default withGranolaAuth(Command);
+
+function Command() {
+  const { noteData, isLoading, hasError, error } = useGranolaData();
 
   // Handle loading and error states
   if (isLoading) {
@@ -54,7 +58,7 @@ export default function Command() {
   }
 
   if (hasError) {
-    return <Unresponsive />;
+    return <Unresponsive context="export-notes" error={error} />;
   }
 
   const untitledNoteTitle = "New note";
@@ -224,7 +228,8 @@ function BulkExportList({ notes, untitledNoteTitle }: { notes: Doc[]; untitledNo
         const panelData = panels[note.id][panelId];
         if (panelData.content) {
           enhancedNotes = convertDocumentToMarkdown(panelData.content);
-        } else if (panelData.original_content) {
+        }
+        if (!enhancedNotes.trim() && panelData.original_content) {
           // Convert HTML to markdown if it's HTML content
           enhancedNotes = convertHtmlToMarkdown(panelData.original_content);
         }
@@ -315,7 +320,8 @@ ${enhancedNotes}
             try {
               const markdownContent = formatNoteAsMarkdown(note, batchPanels, batchNotesMarkdown);
               const safeTitle = sanitizeFileName(note.title || untitledNoteTitle);
-              const fileName = `${safeTitle}_${note.id.substring(0, 8)}.md`;
+              const datePrefix = note.created_at ? new Date(note.created_at).toISOString().split("T")[0] + "_" : "";
+              const fileName = `${datePrefix}${safeTitle}_${note.id.substring(0, 8)}.md`;
               const folderName = folderOrg.documentToFolders[note.id];
 
               const relativePath = writeExportFile(tempDir, fileName, markdownContent, folderName);

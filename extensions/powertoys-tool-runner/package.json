@@ -109,6 +109,33 @@
       "mode": "no-view",
       "subtitle": "PowerToys",
       "icon": "Awake.png"
+    },
+    {
+      "name": "light-switch",
+      "title": "Light Switch",
+      "description": "Toggle light and dark themes using PowerToys Light Switch",
+      "mode": "no-view",
+      "subtitle": "PowerToys",
+      "icon": "Light Switch.png"
+    },
+    {
+      "name": "keyboard-manager",
+      "title": "Keyboard Manager",
+      "description": "Launch PowerToys Keyboard Manager (new)",
+      "mode": "no-view",
+      "subtitle": "PowerToys",
+      "icon": "Keyboard Manager.png"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "autoStartPowerToys",
+      "type": "checkbox",
+      "required": false,
+      "title": "Auto-start settings",
+      "label": "Auto-start PowerToys",
+      "description": "Attempt to start PowerToys before executing a tool",
+      "default": true
     }
   ],
   "dependencies": {
@@ -132,7 +159,10 @@
     "prepublishOnly": "echo \"\\n\\nIt seems like you are trying to publish the Raycast extension to npm.\\n\\nIf you did intend to publish it to npm, remove the \\`prepublishOnly\\` script and rerun \\`npm publish\\` again.\\nIf you wanted to publish it to the Raycast Store instead, use \\`npm run publish\\` instead.\\n\\n\" && exit 1"
   },
   "author": "LostViking09",
-  "contributors": ["Logan-8f"],
+  "contributors": [
+    "Logan-8f",
+    "mitsimi"
+  ],
   "platforms": [
     "Windows"
   ],

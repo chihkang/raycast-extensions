@@ -10,10 +10,14 @@ import { sortNotesByDate, NoteListItem, FolderFilterDropdown } from "./component
 import { toError } from "./utils/errorUtils";
 import { getFolderNoteResults } from "./utils/searchUtils";
 
-export default function Command() {
+import { withGranolaAuth } from "./utils/withGranolaAuth";
+
+export default withGranolaAuth(Command);
+
+function Command() {
   const [selectedFolder, setSelectedFolder] = useState<string>("all");
   const { folders, isLoading: foldersLoading } = useFolders();
-  const { noteData, isLoading, hasError } = useGranolaData();
+  const { noteData, isLoading, hasError, error } = useGranolaData();
   const [foldersWithIds, setFoldersWithIds] = useState<typeof folders>([]);
 
   // Load document_ids lazily after initial render (for counting and filtering)
@@ -68,7 +72,7 @@ export default function Command() {
   }
 
   if (hasError) {
-    return <Unresponsive />;
+    return <Unresponsive context="search-notes" error={error} />;
   }
 
   const untitledNoteTitle = "New note";

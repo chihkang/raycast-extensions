@@ -1,4 +1,5 @@
 import { getActivities } from "../api/client";
+import { toLocalDateString } from "../utils";
 
 type Input = {
   /**
@@ -18,13 +19,20 @@ type Input = {
     | "swim"
     | "hike"
     | "yoga"
+    | "tennis"
+    | "skiing"
     | "nordicski"
     | "strength"
+    | "surf"
     | "other";
   /**
    * Filter by completion status: "true" for completed, "false" for planned
    */
   completed?: string;
+  /**
+   * Include planned activities that have been paired with a completed activity. By default these are hidden. Set to true when looking for the planned ID before unpairing.
+   */
+  includePaired?: boolean;
 };
 
 export default async function (input: Input) {
@@ -33,10 +41,11 @@ export default async function (input: Input) {
   thirtyDaysAgo.setDate(today.getDate() - 30);
 
   const res = await getActivities({
-    from: input.from || thirtyDaysAgo.toISOString().split("T")[0],
-    to: input.to || today.toISOString().split("T")[0],
+    from: input.from || toLocalDateString(thirtyDaysAgo),
+    to: input.to || toLocalDateString(today),
     sportType: input.sportType,
     completed: input.completed,
+    includePaired: input.includePaired,
     limit: 200,
   });
 

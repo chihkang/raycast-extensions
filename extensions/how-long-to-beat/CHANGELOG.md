@@ -1,5 +1,15 @@
 # Howlongtobeat Changelog
 
+## [Added contributor] - 2026-09-07
+
+## [Fixes] - 2026-09-06
+
+- Fix: update to new API endpoint
+
+## [Fixes] - 2026-05-04
+
+- Fix: update to new API endpoint
+
 ## [Fixes] - 2026-03-30
 
 - Fix: update to new API endpoint and request parameters

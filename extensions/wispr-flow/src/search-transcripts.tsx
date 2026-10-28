@@ -14,7 +14,7 @@ import {
   Cache,
 } from "@raycast/api";
 import { useCachedPromise, usePromise, executeSQL } from "@raycast/utils";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { Transcript } from "./types";
 import {
   getAppName,
@@ -23,7 +23,8 @@ import {
   formatDuration,
   groupTranscriptsByDate,
 } from "./utils";
-import { getDbPath, dbExists, writeSQL } from "./db";
+import { getDbPath, dbExists, openWisprFlow, writeSQL } from "./db";
+import { getWindowsAppPathMap } from "./platform";
 
 const COLUMNS = `transcriptEntityId, asrText, formattedText, editedText,
   timestamp, app, url, duration, numWords, status, language, conversationId, isArchived`;
@@ -114,7 +115,9 @@ export default function Command() {
     }
   }, []);
 
-  const { isLoading, data, pagination, revalidate } = useCachedPromise(
+  // Not cached on purpose: a cached first page is the list as of the previous
+  // open, and most opens follow a dictation by seconds.
+  const { isLoading, data, pagination, revalidate } = usePromise(
     (
       search: string,
       app: string,
@@ -139,11 +142,111 @@ export default function Command() {
     [searchText, appFilter, showArchived, minDuration, sortOrder],
   );
 
+  const allTranscripts = useMemo(() => data ?? [], [data]);
+  // Memoized because the list re-renders on every page load; regrouping a few
+  // hundred rows and rebuilding their detail panes is not free.
+  const groups = useMemo(
+    () => groupTranscriptsByDate(allTranscripts),
+    [allTranscripts],
+  );
+  // Sections always render Today -> Yesterday -> ... -> Older whatever the SQL
+  // ORDER BY is, so data[0] is only the top row under "Newest First". Under
+  // "Oldest First" it lands in Older, the last section.
+  const firstRenderedId = groups[0]?.transcripts[0]?.transcriptEntityId;
+
+  // When the query changes, the previous query's rows stay on screen until the
+  // new ones land, and Raycast keeps the selection anchored to a row from the
+  // old set. Pin the selection to the first rendered row once this query's own
+  // results arrive.
+  //
+  // The pin has to follow a full loading cycle rather than just `!isLoading`:
+  // when the query changes there is one render where queryKey is already new but
+  // isLoading and data still belong to the previous query, and pinning there
+  // anchors to a row that may not even be in the new results.
+  const [pinnedId, setPinnedId] = useState<string | null>(null);
+  const queryKey = [
+    searchText,
+    appFilter,
+    sortOrder,
+    showArchived,
+    minDuration,
+  ].join("\u0000");
+  const pinRef = useRef<{ key: string; phase: "armed" | "loading" | "pinned" }>(
+    {
+      key: queryKey,
+      phase: "armed",
+    },
+  );
+  const selectionRef = useRef<string | null>(null);
+  const userMovedRef = useRef(false);
+  if (pinRef.current.key !== queryKey) {
+    pinRef.current = { key: queryKey, phase: "armed" };
+    userMovedRef.current = false;
+  }
+
+  // Refs only, never state. This fires on every arrow-key press, and setting
+  // state here would re-render the whole list -- regrouping every loaded row and
+  // rebuilding each one's detail pane -- on each keystroke. While the fresh query
+  // is in flight the rendered rows are frozen, so any change during that window
+  // is the user navigating rather than Raycast reconciling.
+  const handleSelectionChange = useCallback((id: string | null) => {
+    if (
+      pinRef.current.phase === "loading" &&
+      selectionRef.current !== null &&
+      id !== selectionRef.current
+    ) {
+      userMovedRef.current = true;
+    }
+    selectionRef.current = id;
+  }, []);
+
+  useEffect(() => {
+    const pin = pinRef.current;
+    if (isLoading) {
+      if (pin.phase === "armed") pin.phase = "loading";
+      return;
+    }
+    if (pin.phase !== "loading" || !firstRenderedId) return;
+    pin.phase = "pinned";
+    // The user already picked a row while the query was running; leave it be.
+    if (userMovedRef.current) return;
+    setPinnedId(firstRenderedId);
+  }, [isLoading, queryKey, firstRenderedId]);
+
+  // Hand selection back to Raycast once the pin has been applied. Staying
+  // controlled would re-assert the pinned row on later re-renders (paging in
+  // another 50 transcripts would bounce the highlight back to the top).
+  useEffect(() => {
+    if (pinnedId === null) return;
+    const timer = setTimeout(() => setPinnedId(null), 150);
+    return () => clearTimeout(timer);
+  }, [pinnedId]);
+
+  // Only re-arm when the archived row actually leaves the list and it was the
+  // one selected -- otherwise its id dangles. With Show Archived on the row
+  // stays put, and archiving a row you were not sitting on leaves the selection
+  // valid either way; re-arming in those cases would jump you to the top for no
+  // reason.
+  const handleArchived = useCallback(
+    (archivedId: string) => {
+      if (!showArchived && archivedId === selectionRef.current) {
+        pinRef.current = { key: pinRef.current.key, phase: "armed" };
+        userMovedRef.current = false;
+        setPinnedId(null);
+      }
+      revalidate();
+    },
+    [revalidate, showArchived],
+  );
+
   const { data: uniqueAppsData } = useCachedPromise(
     (archived: boolean) => {
+      // Naming `isArchived` in the outer WHERE forces a table scan, and `app`
+      // sits behind the audio blob in every row. As a subquery, each half is
+      // answered from an index alone.
       const archiveCondition = archived
         ? ""
-        : "AND (isArchived = 0 OR isArchived IS NULL)";
+        : "AND rowid NOT IN (SELECT rowid FROM History WHERE isArchived != 0)";
       return executeSQL<{ app: string }>(
         dbPath,
         `SELECT DISTINCT app FROM History WHERE app IS NOT NULL AND app != '' ${archiveCondition} ORDER BY app`,
@@ -158,13 +261,30 @@ export default function Command() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [uniqueAppsData]);
 
-  const { data: installedApps } = usePromise(getApplications);
+  // Cached so rows carry their app icon on the first paint.
+  const { data: installedApps } = useCachedPromise(() => getApplications());
+  const { data: winRegistryMap } = usePromise(() =>
+    process.platform === "win32"
+      ? getWindowsAppPathMap()
+      : Promise.resolve(new Map<string, string>()),
+  );
   const appPathMap = useMemo(() => {
     const map = new Map<string, string>();
+    const isWindows = process.platform === "win32";
     for (const app of installedApps ?? []) {
-      if (app.bundleId) {
+      if (isWindows) {
+        const exeName = app.path
+          .split(/[\\/]/)
+          .pop()
+          ?.replace(/\.exe$/i, "")
+          .toLowerCase();
+        if (exeName) map.set(exeName, app.path);
+      } else if (app.bundleId) {
         map.set(app.bundleId, app.path);
       }
+    }
+    for (const [name, path] of winRegistryMap ?? []) {
+      if (!map.has(name)) map.set(name, path);
     }
     // Map legacy bundle IDs to current app paths
     const BUNDLE_ALIASES: Record<string, string> = {
@@ -176,14 +296,13 @@ export default function Command() {
       }
     }
     return map;
-  }, [installedApps]);
-
-  const allTranscripts = data ?? [];
-  const groups = groupTranscriptsByDate(allTranscripts);
+  }, [installedApps, winRegistryMap]);
 
   return (
     <List
       isLoading={isLoading}
+      selectedItemId={pinnedId ?? undefined}
+      onSelectionChange={handleSelectionChange}
       searchBarPlaceholder="Search transcripts..."
       onSearchTextChange={setSearchText}
       throttle
@@ -223,8 +342,7 @@ export default function Command() {
               appPathMap={appPathMap}
               primaryAction={primaryAction}
               confirmBeforeArchive={confirmBeforeArchive}
-              dbPath={dbPath}
-              onArchive={revalidate}
+              onArchive={handleArchived}
             />
           ))}
         </List.Section>
@@ -249,15 +367,13 @@ function TranscriptListItem({
   appPathMap,
   primaryAction,
   confirmBeforeArchive,
-  dbPath,
   onArchive,
 }: {
   transcript: Transcript;
   appPathMap: Map<string, string>;
   primaryAction: string;
   confirmBeforeArchive: boolean;
-  dbPath: string;
-  onArchive: () => void;
+  onArchive: (archivedId: string) => void;
 }) {
   const displayText = getDisplayText(transcript);
   const appName = getAppName(transcript.app);
@@ -268,7 +384,11 @@ function TranscriptListItem({
     displayText.length > 80
       ? displayText.substring(0, 80) + "..."
       : displayText;
-  const appPath = transcript.app ? appPathMap.get(transcript.app) : undefined;
+  const appKey =
+    process.platform === "win32"
+      ? transcript.app?.toLowerCase()
+      : transcript.app;
+  const appPath = appKey ? appPathMap.get(appKey) : undefined;
   const appIcon = appPath ? { fileIcon: appPath } : Icon.Microphone;
 
   const handleArchive = useCallback(async () => {
@@ -284,32 +404,32 @@ function TranscriptListItem({
       if (!confirmed) return;
     }
     const escaped = transcript.transcriptEntityId.replace(/'/g, "''");
-    writeSQL(
+    await writeSQL(
       `UPDATE History SET isArchived = 1 WHERE transcriptEntityId = '${escaped}'`,
     );
-    onArchive();
+    onArchive(transcript.transcriptEntityId);
     await showToast({
       style: Toast.Style.Success,
       title: "Transcript archived",
       primaryAction: {
         title: "Undo",
         onAction: async (toast) => {
-          writeSQL(
+          await writeSQL(
             `UPDATE History SET isArchived = 0 WHERE transcriptEntityId = '${escaped}'`,
           );
-          onArchive();
+          onArchive(transcript.transcriptEntityId);
           await toast.hide();
         },
       },
     });
-  }, [transcript.transcriptEntityId, confirmBeforeArchive, dbPath, onArchive]);
+  }, [transcript.transcriptEntityId, confirmBeforeArchive, onArchive]);
 
-  const wisprFlowPath = appPathMap.get("com.electron.wispr-flow");
   const hasOriginalText =
     transcript.asrText && transcript.asrText !== displayText;
 
   return (
     <List.Item
+      id={transcript.transcriptEntityId}
       icon={appIcon}
       title={truncatedTitle}
       detail={
@@ -414,14 +534,12 @@ function TranscriptListItem({
                 target={appPath}
               />
             ) : null}
-            {wisprFlowPath ? (
-              <Action.Open
-                title="Open Wispr Flow"
-                icon={Icon.Microphone}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
-                target={wisprFlowPath}
-              />
-            ) : null}
+            <Action
+              title="Open Wispr Flow"
+              icon={Icon.Microphone}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
+              onAction={() => openWisprFlow("wispr-flow://open")}
+            />
           </ActionPanel.Section>
           <ActionPanel.Section>
             <Action.CopyToClipboard
@@ -441,7 +559,6 @@ function TranscriptListItem({
             <Action
               title="Open Extension Preferences"
               icon={Icon.Gear}
-              shortcut={{ modifiers: ["cmd"], key: "," }}
               onAction={openExtensionPreferences}
             />
           </ActionPanel.Section>

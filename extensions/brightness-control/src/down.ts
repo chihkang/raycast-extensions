@@ -1,17 +1,23 @@
-import { showHUD, showToast, Toast } from "@raycast/api";
-import { ensureLunarReady, adjustCursorBrightness } from "./utils/lunar";
+import { getPreferenceValues } from "@raycast/api";
+import { adjustBrightness } from "./utils/platform";
+import { showBrightnessFeedback } from "./utils/feedback";
 
-export default async function Command() {
-  if (!(await ensureLunarReady())) return;
+export default async () => {
+  const { closeRaycast = true, showDisplayName = true, step = "10" } = getPreferenceValues<Preferences.Down>();
+  const amount = parseStep(step);
+  const result = await adjustBrightness(-amount);
+  if (!result) return;
 
-  try {
-    const { name, brightness } = await adjustCursorBrightness(-10);
-    await showHUD(`${name}: ${brightness}%`);
-  } catch (error) {
-    await showToast({
-      style: Toast.Style.Failure,
-      title: "Failed to decrease brightness",
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
+  const message =
+    result.displayName && result.brightness != null
+      ? showDisplayName
+        ? `${result.displayName}: ${result.brightness}%`
+        : `Brightness set to ${result.brightness}%`
+      : "Brightness decreased";
+  await showBrightnessFeedback(message, closeRaycast);
+};
+
+function parseStep(step: string): number {
+  const amount = Number.parseInt(step, 10);
+  return Number.isInteger(amount) && amount > 0 ? amount : 10;
 }

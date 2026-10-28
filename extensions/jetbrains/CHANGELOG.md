@@ -1,5 +1,16 @@
 # Jetbrains Changelog
 
+## [Windows support] - 2026-09-28
+
+- Add support for Windows platform
+- Add cross-platform keyboard shortcuts
+- Remove the `raycast-hooks` dependency in favor of native `useLocalStorage` from `@raycast/utils`
+
+## [Show Git Branch] - 2026-05-25
+
+- Show the current git branch next to projects that live in a git repository
+- Added a "Show Git Branch" preference (default on) to toggle the behavior
+
 ## [Bugfix] - 2025-10-20
 
 - Added support for JetBrains Toolbox version 3 and improved handling of unsupported versions.

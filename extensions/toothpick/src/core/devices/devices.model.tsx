@@ -4,6 +4,7 @@ import { DevicesMap } from "src/core/devices/constants/specifications";
 import { DeviceBatteryLevels } from "./devices.types";
 import { disconnectDevice } from "src/core/devices/handlers/disconnect-device";
 import { connectDevice } from "./handlers/connect-device";
+import { refreshDevice } from "./handlers/refresh-device";
 
 export class Device {
   name: string;
@@ -17,6 +18,7 @@ export class Device {
   actions: ReactNode[];
   accessories: List.Item.Accessory[];
   rawDeviceData: object;
+  controllable: boolean;
 
   constructor(data: {
     name: string;
@@ -30,6 +32,7 @@ export class Device {
     actions: ReactNode[];
     accessories: List.Item.Accessory[];
     rawDeviceData: object;
+    controllable?: boolean;
   }) {
     this.name = data.name;
     this.icon = data.icon;
@@ -39,6 +42,7 @@ export class Device {
     this.batteryLevels = data.batteryLevels;
     this.productId = data.productId;
     this.vendorId = data.vendorId;
+    this.controllable = data.controllable ?? true;
     this.actions = this.generateActions(data.actions);
     this.accessories = this.generateAccessories(data.accessories);
     this.rawDeviceData = data.rawDeviceData;
@@ -51,21 +55,25 @@ export class Device {
 
   private generateActions(additionalActions: ReactNode[]) {
     return [
-      this.connected ? (
-        <Action
-          title="Disconnect"
-          key="disconnect-action"
-          onAction={() => disconnectDevice(this)}
-          icon={{ source: "icons/disconnect.svg", tintColor: Color.PrimaryText }}
-        />
-      ) : (
-        <Action
-          title="Connect"
-          key="connect-action"
-          onAction={() => connectDevice(this)}
-          icon={{ source: "icons/connect.svg", tintColor: Color.PrimaryText }}
-        />
-      ),
+      ...(this.controllable
+        ? [
+            this.connected ? (
+              <Action
+                title="Disconnect"
+                key="disconnect-action"
+                onAction={() => disconnectDevice(this)}
+                icon={{ source: "icons/disconnect.svg", tintColor: Color.PrimaryText }}
+              />
+            ) : (
+              <Action
+                title="Connect"
+                key="connect-action"
+                onAction={() => connectDevice(this)}
+                icon={{ source: "icons/connect.svg", tintColor: Color.PrimaryText }}
+              />
+            ),
+          ]
+        : []),
       <Action
         title={`Copy Mac Address: ${this.macAddress}`}
         key="copy-mac-address"
@@ -86,6 +94,17 @@ export class Device {
         icon={Icon.Pencil}
         shortcut={Keyboard.Shortcut.Common.CopyName}
       />,
+      ...(this.controllable
+        ? [
+            <Action
+              title="Refresh"
+              key="refresh-action"
+              onAction={() => refreshDevice(this)}
+              icon={Icon.ArrowClockwise}
+              shortcut={Keyboard.Shortcut.Common.Refresh}
+            />,
+          ]
+        : []),
       ...additionalActions,
     ];
   }

@@ -1,5 +1,148 @@
 # Skills Changelog
 
+## [Sync with Skills CLI 1.7] - 2026-10-22
+
+- Show skills installed from a local path with a `~`-relative source in Manage Skills, instead of the absolute path offered as a repository link and URL
+- Add the fx, Grok Build, Kimchi, MiniMax Code, Posit Assistant, Sarvam Code, and ZCode agents, so installing to Grok Build passes its real `grok` ID instead of failing
+- Read `SKILL.md` frontmatter that starts with a byte order mark or has no content after it
+
+## [Fix Multiline Skill Descriptions] - 2026-10-18
+
+- Show complete descriptions from multiline YAML frontmatter in Search Skills and Manage Skills details
+- Ignore invalid frontmatter metadata so skill details remain readable
+
+## [Fix Skills List Troubleshooting] - 2026-10-17
+
+- Include `--json` in the troubleshooting commands so they match the installed-skills list command used by the extension
+
+## [Show Unexpected CLI Output When Listing Fails] - 2026-09-26
+
+- Include what the `skills` CLI actually printed when "Manage Skills" cannot parse its installed-skills list, instead of only reporting that the output was unexpected
+
+## [Fix Commands Waiting Forever Behind Each Other] - 2026-09-12
+
+- Stop a second command from waiting indefinitely behind a running one: opening Manage Skills during "Update All Skills" now either gets its turn or reports that another skills command is still running, instead of showing an empty list and spinning for minutes
+- Fail immediately on a permanent problem such as a support directory that cannot be written, which was previously retried forever
+- Stop the running command when it loses its lock, rather than letting it keep changing the same skills another process is now free to change, and stop a failed lock release from replacing the real error
+- Give read-only commands room for the initial download of the `skills` CLI, so an ordinary first run on a slow connection no longer fails
+- Point a timed-out command at the custom package registry setup as well as the network, since a proxied registry is a common cause
+
+## [Fix Update All Skills Timing Out] - 2026-09-11
+
+- Allow `add`, `remove`, and `update` up to 5 minutes instead of 30 seconds, so "Update All Skills" no longer fails with a bare "Command failed: npx -y skills@latest update -g -y" once checking every installed skill's source takes longer than that
+- Report that the `skills` CLI timed out, including whatever it printed before being stopped, instead of only the command that failed
+- Include the CLI output in the logs copied by the failure toast's "Report Error" action, which previously carried only the original message
+- Stop retrying a timed-out `bunx` run through `npx`, which only doubled the wait
+
+## [Serialize Concurrent CLI Commands] - 2026-08-24
+
+- Prevent simultaneous Raycast commands from racing in the shared `npx` cache and intermittently failing with `ENOTEMPTY`
+- Read the installed-skill list and metadata from one locked snapshot so Manage Skills does not show mismatched data
+
+## [Updated contributor] - 2026-08-18
+
+## [Fix Runtime Detection and Skill Lookup] - 2026-07-30
+
+- Detect `bun`/`node` installed outside a version manager or Homebrew, so "Unable to find a working bunx or npx command" no longer appears for Bun's official installer (`~/.bun/bin`), Nix / nix-darwin profiles, mise, and asdf
+- Report what the `skills` CLI printed when it exits non-zero, instead of only "Command failed: bunx --silent skills@latest …" with no reason — the CLI writes its errors to stdout, which was being discarded
+- Fall back to `npx` when `bunx` dies without printing anything at all, limited to read-only commands so a mutating `add`/`remove`/`update` is never run twice
+- Resolve skills whose `SKILL.md` sits at the repository root (single-skill repos), which previously failed to load in the detail view
+- Make the `read-skill` AI tool use the same repo-layout resolution as the detail view, so nested and root-level skills are readable
+
+## [Document Custom Registry Configuration] - 2026-07-03
+
+- Add README guidance for pointing `bunx`/`npx` at a custom package registry (corporate proxy) via `~/.npmrc` and `~/.bunfig.toml`, since Raycast does not inherit shell environment variables
+
+## [Use Security Audit API] - 2026-06-26
+
+- Use the Skills security audit API instead of parsing audit data from the skills.sh HTML page
+
+## [Sync Skills Agent IDs] - 2026-06-26
+
+- Sync the local Skills CLI agent ID fallback map with the upstream supported agents list
+
+## [Add Update All Skills Command] - 2026-06-16
+
+- Add a standalone "Update All Skills" command to update all installed skills directly from Raycast
+
+## [Fix Skill Contents for Nested Skills] - 2026-06-09
+
+- Fix skill details and the "Copy Skill Contents" action falling back to the repository README for skills nested under category folders (e.g. `skills/productivity/grill-me/SKILL.md`) by locating the real SKILL.md anywhere in the repository tree
+
+## [Copy Skill Contents] - 2026-06-06
+
+- Add a "Copy Skill Contents" action to copy a skill's full SKILL.md to the clipboard from search results, skill details, and installed skills, so it can be pasted into tools like ChatGPT or Claude without installing the skill
+- Move the "Copy Install Command" action to `⌘ ⇧ I` so the canonical copy shortcut (`⌘ ⇧ C`) copies the skill contents
+
+## [Fix Confirmation Dialog Icon] - 2026-06-05
+
+- Show a relevant icon in the Update, Install, and Remove confirmation dialogs instead of falling back to the oversized extension icon on Windows
+
+## [Fix Global Skill Updates] - 2026-06-04
+
+- Run skill update actions against global installs, matching the global skill list shown in Manage Skills
+
+## [Default Agents Preference] - 2026-06-01
+
+- Add a "Default Agents" preference to pre-select agents when installing a skill, so frequently-used agents (e.g. Claude Code) are checked automatically without manual selection each time
+
+## [Show Installed Skill Audit Details] - 2026-05-20
+
+- Add an "Open on skills.sh" action and `skills.sh` detail link for published installed skills
+- Show security audit statuses, audit links, and audit actions in installed skill details
+
+## [Ask Skills AI Extension] - 2026-05-12
+
+- Add `@skills` support in Raycast AI Chat with five tools: search the marketplace by query, read a skill's full instructions, list installed skills, install a skill for specific agents, and remove a skill
+
+## [Fix Stale Search Results] - 2026-05-12
+
+- Clear stale search results when the current search fails or is superseded by a newer query
+
+## [Standardize Open Actions] - 2026-05-12
+
+- Standardize **Open on skills.sh** and **Open Repository** actions across Search Skills and Manage Skills
+
+## [Fix Support Directory Initialization] - 2026-05-11
+
+- Ensure the extension support directory exists before cached hooks run, preventing "Could not create extension support directory" errors on first launch
+
+## [Add Newly Supported Agents] - 2026-05-05
+
+- Add 11 agents supported by the Skills CLI: AiderDesk, Code Studio, CodeArts Agent, Codemaker, Devin for Terminal, Dexto, ForgeCode, IBM Bob, Rovo Dev, Tabnine CLI, and Universal
+
+## [Improve Installed Indicators, Source Matching & Refresh] - 2026-05-05
+
+- Replace the green "Installed" tag in "Search Skills" with a green check-circle indicator and green skill icon for installed skills
+- Show the skill source (`owner/repo`) as the subtitle in "Search Skills" and "Manage Skills" to better distinguish skills between them
+- Move "Search Skills" result details out of the side panel and into a full-screen detail view
+- Detect skills with the same `skillId` installed from different sources. Show a warning indicator and rename the "Install Skill" action to "Replace Installed Skill" for clarity on the outcome
+- Immediately refresh installed indicators in "Search Skills" after installing or replacing a skill
+- Add "Refresh Installed Skills" actions with Cmd+R in "Manage Skills"
+- Consolidate shared install, remove, and update action handling for more consistent confirmations, toasts, and error messages
+
+## [Show Last Updated Date in Search Results] - 2026-04-30
+
+- Show the repository's last updated date in the skill detail panel, displayed as a relative time (e.g. "3 days ago")
+
+## [Add Repository Shortcut] - 2026-04-30
+
+- Add a keyboard shortcut to open a skill's repository from the action panel
+
+## [Fix Windows bunx Fallback] - 2026-04-30
+
+- Fix the Skills CLI throwing `'"bunx"' is not recognized as an internal or external command` on Windows when Bun is not installed; the extension now correctly falls back to `npx` as intended
+
+## [Add bunx support] - 2026-04-28
+
+- Added initial support for `bunx`, it is only called optimally if `npx` is not found
+
+## [Add Skills CLI Telemetry Opt-Out] - 2026-04-28
+
+- Add an extension preference to opt out of anonymous usage telemetry collected by the underlying Skills CLI when commands are run from Raycast
+- Pass `DISABLE_TELEMETRY=1` to all Skills CLI invocations when the preference is enabled
+- Trim the optional GitHub token preference before using it for repository stats and update checks
+
 ## [Fix Homebrew `node@` Resolution and add Custom `npx` Validation] - 2026-04-23
 
 - Detect versioned Homebrew Node formula bins like `/opt/homebrew/opt/node@24/bin` so the Skills CLI can find `node` when `npx` comes from Homebrew, while still preferring Node installs from version managers first

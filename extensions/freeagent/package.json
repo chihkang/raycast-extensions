@@ -5,6 +5,9 @@
   "description": "Interact with FreeAgent",
   "icon": "icon.png",
   "author": "SteveEdson",
+  "contributors": [
+    "jcwacky"
+  ],
   "license": "MIT",
   "categories": ["Finance", "Productivity"],
   "commands": [
@@ -48,6 +51,13 @@
       "title": "Create Task",
       "subtitle": "FreeAgent",
       "description": "Create a task in FreeAgent",
+      "mode": "view"
+    },
+    {
+      "name": "create-expense",
+      "title": "Create Expense",
+      "subtitle": "FreeAgent",
+      "description": "Create an expense in FreeAgent",
       "mode": "view"
     },
     {

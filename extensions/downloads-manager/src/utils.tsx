@@ -1,16 +1,32 @@
 import {
   Action,
   ActionPanel,
+  Alert,
   Cache,
   confirmAlert,
   Detail,
   getPreferenceValues,
+  LocalStorage,
+  showHUD,
   showToast,
   Toast,
   trash,
 } from "@raycast/api";
 import { showFailureToast } from "@raycast/utils";
-import { accessSync, constants, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "fs";
+import {
+  accessSync,
+  closeSync,
+  constants,
+  existsSync,
+  mkdtempSync,
+  openSync,
+  opendirSync,
+  readdirSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  statSync,
+} from "fs";
 import { rm } from "fs/promises";
 import { join } from "path";
 import { execFile, execSync } from "child_process";
@@ -20,6 +36,8 @@ import untildify from "untildify";
 
 const cache = new Cache();
 const CACHE_KEY = "customDownloadsFolder";
+const DELETION_BEHAVIOR_KEY = "deletion-behavior";
+const PERMANENT_DELETE_CONFIRMATION_KEY = "permanent-delete-confirmation-choice";
 
 const preferences = getPreferenceValues();
 
@@ -91,86 +109,112 @@ export function isImageFile(filename: string): boolean {
 }
 
 function countDirectoryItems(dirPath: string): number {
+  let directory;
   try {
-    const items = readdirSync(dirPath);
-    return items.filter((name) => showHiddenFiles || !name.startsWith(".")).length;
+    directory = opendirSync(dirPath);
+    let count = 0;
+    let entry;
+    while ((entry = directory.readSync()) !== null) {
+      if (showHiddenFiles || !entry.name.startsWith(".")) {
+        count += 1;
+      }
+    }
+    return count;
   } catch (error) {
     console.warn(`Error counting items in directory '${dirPath}':`, error);
     return 0;
+  } finally {
+    directory?.closeSync();
   }
 }
 
 export function getDownloadsCount(): number {
-  const files = readdirSync(downloadsFolder);
-  return files.filter((file) => showHiddenFiles || !file.startsWith(".")).length;
+  return countDirectoryItems(downloadsFolder);
 }
 
-export function getDownloads(limit?: number, offset: number = 0, currentFolderPath: string | null = null) {
-  const files = readdirSync(currentFolderPath ?? downloadsFolder);
-  const filteredFiles = files.filter((file) => showHiddenFiles || !file.startsWith("."));
+type DownloadOrder = "addTime" | "createTime" | "modifiedTime" | "birthTime";
 
-  const allDownloads = filteredFiles
-    .map((file) => {
-      const path = join(currentFolderPath ?? downloadsFolder, file);
+function compareDownloads(a: Download, b: Download, order: DownloadOrder): number {
+  let difference: number;
+  switch (order) {
+    case "addTime":
+      difference = b.addedAt.getTime() - a.addedAt.getTime();
+      break;
+    case "createTime":
+      difference = b.createdAt.getTime() - a.createdAt.getTime();
+      break;
+    case "birthTime":
+      difference = b.birthAt.getTime() - a.birthAt.getTime();
+      break;
+    case "modifiedTime":
+    default:
+      difference = b.lastModifiedAt.getTime() - a.lastModifiedAt.getTime();
+      break;
+  }
+
+  return difference || a.file.localeCompare(b.file);
+}
+
+function getDownloadsInOrder(
+  order: DownloadOrder,
+  limit?: number,
+  offset: number = 0,
+  currentFolderPath: string | null = null,
+): Download[] {
+  const folderPath = currentFolderPath ?? downloadsFolder;
+  const maximumCandidates = limit === undefined ? undefined : offset + limit;
+  const candidates: Download[] = [];
+  const directory = opendirSync(folderPath);
+
+  try {
+    let entry;
+    while ((entry = directory.readSync()) !== null) {
+      if (!showHiddenFiles && entry.name.startsWith(".")) {
+        continue;
+      }
+
+      const path = join(folderPath, entry.name);
       try {
         const stats = statSync(path);
         const isDirectory = stats.isDirectory();
-        const size = isDirectory ? 0 : stats.size;
-        const itemCount = isDirectory ? countDirectoryItems(path) : undefined;
-        return {
-          file,
+        const download: Download = {
+          file: entry.name,
           path,
-          size,
+          size: isDirectory ? 0 : stats.size,
           isDirectory,
-          itemCount,
           lastModifiedAt: stats.mtime,
           createdAt: stats.ctime,
           addedAt: stats.atime,
           birthAt: stats.birthtime,
         };
+
+        const insertionIndex = candidates.findIndex((candidate) => compareDownloads(download, candidate, order) < 0);
+        candidates.splice(insertionIndex === -1 ? candidates.length : insertionIndex, 0, download);
+        if (maximumCandidates !== undefined && candidates.length > maximumCandidates) {
+          candidates.pop();
+        }
       } catch (error) {
         // Skip entries we can't stat (broken symlinks, removed targets, permission issues)
         console.warn(`Skipping '${path}' because it could not be stat'd:`, error);
-        return undefined;
       }
-    })
-    .filter((entry) => Boolean(entry))
-    .map((entry) => entry as Exclude<typeof entry, undefined>)
-    .sort((a, b) => {
-      switch (fileOrder) {
-        case "addTime":
-          return b.addedAt.getTime() - a.addedAt.getTime();
-        case "createTime":
-          return b.createdAt.getTime() - a.createdAt.getTime();
-        case "modifiedTime":
-        default:
-          return b.lastModifiedAt.getTime() - a.lastModifiedAt.getTime();
-      }
-    });
-
-  if (limit !== undefined) {
-    return allDownloads.slice(offset, offset + limit);
+    }
+  } finally {
+    directory.closeSync();
   }
-  return allDownloads;
+
+  const downloads = limit === undefined ? candidates : candidates.slice(offset, offset + limit);
+  return downloads.map((download) => ({
+    ...download,
+    itemCount: download.isDirectory ? countDirectoryItems(download.path) : undefined,
+  }));
+}
+
+export function getDownloads(limit?: number, offset: number = 0, currentFolderPath: string | null = null) {
+  return getDownloadsInOrder(fileOrder, limit, offset, currentFolderPath);
 }
 
 export function getLatestDownload() {
-  const downloads = getDownloads();
-  if (downloads.length < 1) {
-    return undefined;
-  }
-
-  if (latestDownloadOrder === "addTime") {
-    downloads.sort((a, b) => b.addedAt.getTime() - a.addedAt.getTime());
-  } else if (latestDownloadOrder === "createTime") {
-    downloads.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-  } else if (latestDownloadOrder === "modifiedTime") {
-    downloads.sort((a, b) => b.lastModifiedAt.getTime() - a.lastModifiedAt.getTime());
-  } else if (latestDownloadOrder === "birthTime") {
-    downloads.sort((a, b) => b.birthAt.getTime() - a.birthAt.getTime());
-  }
-
-  return downloads[0];
+  return getDownloadsInOrder(latestDownloadOrder, 1)[0];
 }
 
 export function hasAccessToDownloadsFolder() {
@@ -183,38 +227,194 @@ export function hasAccessToDownloadsFolder() {
   }
 }
 
-export async function deleteFileOrFolder(filePath: string) {
-  if (preferences.deletionBehavior === "trash") {
+type DeleteFeedback = "toast" | "hud" | "none";
+export type DeletionBehavior = "trash" | "permaDel";
+
+export function getDeletionBehaviorTitle(deletionBehavior: DeletionBehavior) {
+  return deletionBehavior === "trash" ? "Trash" : "Permanently Delete";
+}
+
+async function showDeleteFeedback(feedback: DeleteFeedback, title: string, style: Toast.Style) {
+  if (feedback === "hud") {
+    await showHUD(title);
+  } else if (feedback === "toast") {
+    await showToast({ style, title });
+  }
+}
+
+const finderTrashScript = `on run argv
+  set trashedIndexes to {}
+  set itemIndex to 1
+  repeat with filePath in argv
+    try
+      set targetFile to POSIX file (filePath as text) as alias
+      tell application "Finder" to delete targetFile
+      set end of trashedIndexes to itemIndex
+    end try
+    set itemIndex to itemIndex + 1
+  end repeat
+  set AppleScript's text item delimiters to ","
+  return trashedIndexes as string
+end run`;
+
+function getTrashedPathsFromFinderStdout(filePaths: string[], stdout: string): string[] {
+  return stdout
+    .trim()
+    .split(",")
+    .map((index) => Number.parseInt(index.trim(), 10))
+    .filter((index) => Number.isInteger(index) && index > 0 && index <= filePaths.length)
+    .map((index) => filePaths[index - 1]);
+}
+
+function trashWithFinder(filePaths: string[]): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    execFile("/usr/bin/osascript", ["-e", finderTrashScript, ...filePaths], (error, stdout) => {
+      const reportedPaths = getTrashedPathsFromFinderStdout(filePaths, stdout);
+
+      if (!error) {
+        resolve(reportedPaths);
+        return;
+      }
+
+      // osascript can exit non-zero after Finder has already moved some items.
+      // Recover those so callers can drop stale list entries instead of showing a total failure.
+      const trashedPaths = [...new Set([...reportedPaths, ...filePaths.filter((path) => !existsSync(path))])];
+      if (trashedPaths.length === 0) {
+        reject(error);
+        return;
+      }
+
+      resolve(trashedPaths);
+    });
+  });
+}
+
+export type MoveToTrashResult = {
+  trashedPaths: string[];
+  failedPaths: string[];
+};
+
+export async function moveToTrash(paths: string | string[]): Promise<MoveToTrashResult> {
+  const filePaths = Array.isArray(paths) ? paths : [paths];
+
+  try {
+    await trash(paths);
+    return { trashedPaths: filePaths, failedPaths: [] };
+  } catch (error) {
+    if (process.platform !== "darwin") {
+      throw error;
+    }
+
+    // Raycast's Trash API can fail for items in an iCloud Drive-backed Downloads folder.
+    // Finder understands the file provider location and moves those items to Trash correctly.
+    const remainingPaths = filePaths.filter(existsSync);
+    const trashedPaths = filePaths.filter((path) => !existsSync(path));
+
+    let finderTrashedPaths: string[] = [];
     try {
-      await trash(filePath);
-      await showToast({ style: Toast.Style.Success, title: "Item Moved to Trash" });
+      finderTrashedPaths = remainingPaths.length > 0 ? await trashWithFinder(remainingPaths) : [];
+    } catch (finderError) {
+      if (trashedPaths.length === 0) {
+        throw finderError;
+      }
+    }
+
+    const allTrashedPaths = [...trashedPaths, ...finderTrashedPaths];
+    return {
+      trashedPaths: allTrashedPaths,
+      failedPaths: filePaths.filter((path) => !allTrashedPaths.includes(path)),
+    };
+  }
+}
+
+export async function deleteFileOrFolder(
+  filePath: string,
+  options: {
+    feedback?: DeleteFeedback;
+    beforeFeedback?: () => Promise<void>;
+    confirmationMessage?: string;
+    skipConfirmation?: boolean;
+    deletionBehavior?: DeletionBehavior;
+  } = {},
+) {
+  const feedback = options.feedback ?? "toast";
+  const deletionBehavior = options.deletionBehavior ?? (await getDeletionBehavior());
+
+  if (deletionBehavior === "trash") {
+    try {
+      const { failedPaths } = await moveToTrash(filePath);
+      if (failedPaths.length > 0) {
+        throw new Error(`Could not move ${failedPaths.join(", ")} to Trash`);
+      }
     } catch (error) {
       await showFailureToast(error, { title: "Move to Trash Failed" });
+      return;
     }
+    await options.beforeFeedback?.();
+    await showDeleteFeedback(feedback, "Item Moved to Trash", Toast.Style.Success);
     return;
   }
 
-  const shouldDelete = await confirmAlert({
-    title: "Delete Item?",
-    message: `Are you sure you want to permanently delete:\n${filePath}?`,
-    primaryAction: {
-      title: "Delete",
-    },
-  });
+  let shouldDelete = options.skipConfirmation ?? false;
+
+  if (!options.skipConfirmation) {
+    shouldDelete = await confirmAlert({
+      title: "Delete Item?",
+      message:
+        options.confirmationMessage ??
+        `Are you sure you want to permanently delete:\n${filePath}?\nThis action cannot be undone.`,
+      primaryAction: {
+        title: "Delete",
+        style: Alert.ActionStyle.Destructive,
+      },
+      dismissAction: {
+        title: "Cancel",
+        style: Alert.ActionStyle.Cancel,
+      },
+    });
+    await LocalStorage.setItem(PERMANENT_DELETE_CONFIRMATION_KEY, shouldDelete ? "delete" : "cancel");
+  }
 
   if (!shouldDelete) {
-    await showToast({ style: Toast.Style.Animated, title: "Cancelled" });
+    await options.beforeFeedback?.();
+    await showDeleteFeedback(feedback, "Cancelled", Toast.Style.Animated);
     return;
   }
 
   try {
     await rm(filePath, { recursive: true, force: true });
-    await showToast({ style: Toast.Style.Success, title: "Item Deleted" });
+    await options.beforeFeedback?.();
+    await showDeleteFeedback(feedback, "Item Deleted", Toast.Style.Success);
   } catch (error) {
     if (error instanceof Error) {
       await showFailureToast(error, { title: "Deletion Failed" });
     }
   }
+}
+
+export async function getPermanentDeleteConfirmationChoice() {
+  return LocalStorage.getItem<"delete" | "cancel">(PERMANENT_DELETE_CONFIRMATION_KEY);
+}
+
+export async function getDeletionBehavior(): Promise<DeletionBehavior> {
+  const deletionBehavior = await LocalStorage.getItem<DeletionBehavior>(DELETION_BEHAVIOR_KEY);
+
+  if (deletionBehavior) {
+    return deletionBehavior;
+  }
+
+  return preferences.deletionBehavior as DeletionBehavior;
+}
+
+export async function getShowDeletingFilenameBehavior(): Promise<boolean> {
+  return preferences.showDeletingFilename;
+}
+
+export async function toggleDeletionBehavior() {
+  const currentDeletionBehavior = await getDeletionBehavior();
+  const nextDeletionBehavior = currentDeletionBehavior === "trash" ? "permaDel" : "trash";
+  await LocalStorage.setItem(DELETION_BEHAVIOR_KEY, nextDeletionBehavior);
+  return nextDeletionBehavior;
 }
 
 export const withAccessToDownloadsFolder = <P extends object>(Component: ComponentType<P>) => {
@@ -359,16 +559,23 @@ export function isTextFile(filename: string): boolean {
 }
 
 export function getTextFilePreview(filePath: string): string {
+  let descriptor: number | undefined;
   try {
-    const buffer = readFileSync(filePath);
-    const truncated = buffer.length > TEXT_PREVIEW_MAX_BYTES;
-    const text = buffer.slice(0, TEXT_PREVIEW_MAX_BYTES).toString("utf-8");
+    descriptor = openSync(filePath, "r");
+    const buffer = Buffer.alloc(TEXT_PREVIEW_MAX_BYTES + 1);
+    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
+    const truncated = bytesRead > TEXT_PREVIEW_MAX_BYTES;
+    const text = buffer.subarray(0, Math.min(bytesRead, TEXT_PREVIEW_MAX_BYTES)).toString("utf-8");
     const dotIndex = filePath.lastIndexOf(".");
     const ext = dotIndex !== -1 ? filePath.slice(dotIndex + 1).toLowerCase() : "";
     const lang = extToLanguage[ext] ?? "";
     return `\`\`\`${lang}\n${text}${truncated ? "\n\u2026" : ""}\n\`\`\``;
   } catch {
     return "*Cannot read file content*";
+  } finally {
+    if (descriptor !== undefined) {
+      closeSync(descriptor);
+    }
   }
 }
 

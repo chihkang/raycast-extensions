@@ -1,5 +1,28 @@
 # Brightness Control Changelog
 
+## [Instant brightness on Windows and Min Brightness command] - 2026-09-28
+
+- Add `Min Brightness` command
+- Add `Close Raycast` preference: disable to keep Raycast open
+- Add `Show display name` preference
+- Add `Step Size` preference to increase or decrease by a custom amount
+- Windows commands now use a native Rust backend (WMI + DDC/CI via dxva2) instead of spawning PowerShell on every press, resulting in instant brightness changes
+- The PowerShell implementation is kept as an automatic fallback and is faster too: cached script file, no `cmd.exe` layer, and the DDC/CI helper DLL is compiled once and reused
+- Bump all dependencies to the latest
+
+## [Fix WMI brightness on Windows] - 2026-04-29
+
+- Fixed brightness control failing on Windows by replacing the deprecated `WmiSetBrightness` call pattern with `Invoke-CimMethod`, which properly returns a result that can be checked for success.
+
+## [Fix Brightness Down bug] - 2026-04-28
+
+- "Brightness Down" failed with "Error: Unknown option '-10'" since subprocess evaluates the "-10" as an argument. Added a leading "--" to prevent it.
+
+## [Update] - 2026-04-28
+
+- Add windows support
+- Update packages
+
 ## [Fix Brightness Up/Down hotkey bug] - 2026-04-15
 
 - Fixed "Brightness Up" and "Brightness Down" silently failing when triggered via a hotkey ([raycast/extensions#27085](https://github.com/raycast/extensions/issues/27085)). The commands now use Lunar's relative brightness CLI (`displays <serial> brightness +/-N`) instead of synthesizing brightness key codes via AppleScript, so held hotkey modifiers no longer suppress the adjustment.

@@ -21,6 +21,16 @@ export const baseURI = "https://api.awork.com/api/v1";
 
 const preferences = getPreferenceValues<Preferences>();
 
+type TokenListener = () => void;
+const tokenListeners = new Set<TokenListener>();
+
+export const onTokenChange = (listener: TokenListener): (() => void) => {
+  tokenListeners.add(listener);
+  return () => tokenListeners.delete(listener);
+};
+
+const notifyTokenChanged = () => tokenListeners.forEach((l) => l());
+
 export const client = new OAuth.PKCEClient({
   providerName: "awork",
   redirectMethod: OAuth.RedirectMethod.Web,
@@ -83,8 +93,9 @@ const authorizeClient = async () => {
       const newTokens = <OAuth.TokenResponse>JSON.parse(result);
       try {
         await client.setTokens(newTokens);
+        notifyTokenChanged();
       } catch {
-        confirmAlert({
+        await confirmAlert({
           title: "Something went wrong",
           message: "Please try again.",
           primaryAction: {
@@ -141,6 +152,7 @@ export const refreshToken = async (options: TokenOptions = {}) => {
     const result = await response.text();
     const newTokens = <OAuth.TokenResponse>JSON.parse(result);
     await client.setTokens(newTokens);
+    notifyTokenChanged();
   } catch (error) {
     if (allowUserInteraction) {
       await showReauthorizeAlert();
@@ -180,7 +192,7 @@ const getUserData = async () => {
       await LocalStorage.setItem("URL", data.workspace.url);
     })
     .catch((error: Error) => {
-      showFailureToast("Failed to fetch user data", error);
+      showFailureToast(error, { title: "Failed to fetch user data" });
       console.error(error);
     });
 };
@@ -201,4 +213,27 @@ export const getTokens = async (options: TokenOptions = {}) => {
   } else {
     return tokens;
   }
+};
+
+export const getWorkspaceUrl = async (): Promise<string> => {
+  const storedTokens = await client.getTokens();
+  const cachedUrl = await LocalStorage.getItem<string>("URL");
+
+  // If tokens exist locally (even if expired/unrefreshable) and we have a cached URL,
+  // return it immediately — the browser session may still be active.
+  if (storedTokens && cachedUrl) return cachedUrl;
+
+  // No tokens stored means the user is signed out; require a full sign-in.
+  if (!(await getTokens())) {
+    throw new Error("Please sign in to your awork workspace and try again.");
+  }
+
+  await getUserData();
+  const url = await LocalStorage.getItem<string>("URL");
+
+  if (!url) {
+    throw new Error("Couldn't determine your awork workspace URL. Please try again.");
+  }
+
+  return url;
 };

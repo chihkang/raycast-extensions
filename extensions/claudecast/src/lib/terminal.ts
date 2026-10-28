@@ -1,10 +1,32 @@
 import { getPreferenceValues, showToast, Toast, open } from "@raycast/api";
 import { execFile } from "child_process";
 import { promisify } from "util";
-import { writeFileSync } from "fs";
+import { writeFileSync, unlinkSync, mkdirSync, existsSync } from "fs";
 import { tmpdir, homedir } from "os";
 import { join } from "path";
+import { randomUUID } from "crypto";
 import type { PermissionMode } from "./session-parser";
+import { expandHomePath, isWindows } from "./platform";
+import {
+  getAvailableWindowsTerminals,
+  openWindowsWslWithArgs,
+  openWindowsTerminalWithCommand,
+  quotePowerShellArgument,
+  WindowsTerminalApp,
+} from "./windows-runtime";
+import {
+  buildClaudeLaunchArgs,
+  buildShellCommandInDirectory,
+  quotePosixShellArgument,
+  validateRalphOptions,
+} from "./terminal-core";
+import { getClaudePath } from "./claude-cli";
+import { getClaudeSpawnSpec } from "./claude-process-core";
+import {
+  buildWslClaudeArgs,
+  buildWslClaudePromptFileArgs,
+  windowsPathToWslMountPath,
+} from "./wsl-core";
 
 const execFilePromise = promisify(execFile);
 
@@ -14,14 +36,52 @@ const execFilePromise = promisify(execFile);
  * must be resolved before passing to existsSync, mkdirSync, or cd.
  */
 export function expandTilde(inputPath: string): string {
-  const trimmed = inputPath.trim();
-  const home = homedir();
-  if (trimmed === "~") return home;
-  if (trimmed.startsWith("~/")) return home + trimmed.slice(1);
-  return trimmed;
+  return expandHomePath(inputPath);
 }
 
-type TerminalApp = "Terminal" | "iTerm" | "Warp" | "kitty" | "Ghostty";
+/**
+ * Normalize a full model ID (e.g. "claude-opus-4-6") to the short name
+ * ("opus") that Claude Code expects for proper feature enablement like
+ * extended context windows.
+ */
+type MacTerminalApp =
+  | "Terminal"
+  | "iTerm"
+  | "Warp"
+  | "kitty"
+  | "Ghostty"
+  | "cmux";
+type TerminalApp = MacTerminalApp | WindowsTerminalApp;
+type OpenIn = "window" | "tab";
+
+function isTerminalApp(value: string | undefined): value is TerminalApp {
+  return (
+    value === "Terminal" ||
+    value === "iTerm" ||
+    value === "Warp" ||
+    value === "kitty" ||
+    value === "Ghostty" ||
+    value === "cmux" ||
+    value === "Windows Terminal" ||
+    value === "PowerShell" ||
+    value === "Windows PowerShell" ||
+    value === "Command Prompt"
+  );
+}
+
+function isWindowsTerminalApp(value: TerminalApp): value is WindowsTerminalApp {
+  return (
+    value === "Windows Terminal" ||
+    value === "PowerShell" ||
+    value === "Windows PowerShell" ||
+    value === "Command Prompt"
+  );
+}
+
+/** Quote one argument for the POSIX shells used by the macOS launchers. */
+function shellQuote(value: string): string {
+  return quotePosixShellArgument(value);
+}
 
 /**
  * Open a new terminal window/tab and run a command
@@ -31,33 +91,52 @@ export async function openTerminalWithCommand(
   options: {
     cwd?: string;
     terminalApp?: string;
+    openIn?: OpenIn;
   } = {},
 ): Promise<void> {
   const preferences = getPreferenceValues<Preferences>();
-  const terminal = (options.terminalApp ||
-    preferences.terminalApp ||
-    "Terminal") as TerminalApp;
+  const configuredTerminal = isTerminalApp(options.terminalApp)
+    ? options.terminalApp
+    : preferences.terminalApp;
+  const terminal = getTerminalForPlatform(configuredTerminal);
+  const openIn: OpenIn = options.openIn || preferences.openIn || "window";
   const cwd = expandTilde(options.cwd || "") || homedir() || "/";
 
   try {
+    if (isWindows()) {
+      await openWindowsTerminalWithCommand(
+        command,
+        cwd,
+        terminal as WindowsTerminalApp,
+        openIn,
+      );
+      return;
+    }
+
     switch (terminal) {
       case "Terminal":
-        await openInTerminalApp(command, cwd);
+        await openInTerminalApp(command, cwd, openIn);
         break;
       case "iTerm":
-        await openInITerm(command, cwd);
+        await openInITerm(command, cwd, openIn);
         break;
       case "Warp":
+        // Warp always opens a new window. The YAML launch-config flow is the
+        // only reliable mechanism; new-tab via System Events keystroke or
+        // the warp:// URL scheme is unreliable in practice.
         await openInWarp(command, cwd);
         break;
       case "kitty":
-        await openInKitty(command, cwd);
+        await openInKitty(command, cwd, openIn);
         break;
       case "Ghostty":
-        await openInGhostty(command, cwd);
+        await openInGhostty(command, cwd, openIn);
+        break;
+      case "cmux":
+        await openInCmux(command, cwd, openIn);
         break;
       default:
-        await openInTerminalApp(command, cwd);
+        await openInTerminalApp(command, cwd, openIn);
     }
   } catch (error) {
     await showToast({
@@ -65,48 +144,230 @@ export async function openTerminalWithCommand(
       title: "Failed to open terminal",
       message: error instanceof Error ? error.message : String(error),
     });
+    throw error;
   }
 }
 
-async function openInTerminalApp(command: string, cwd: string): Promise<void> {
-  const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, "\\$");
-  const escapedCwd = cwd.replace(/"/g, '\\"');
-
-  const script = `
-    tell application "Terminal"
-      activate
-      do script "cd \\"${escapedCwd}\\" && ${escapedCommand}"
-    end tell
-  `;
-
-  await execFilePromise("osascript", ["-e", script]);
+function getTerminalForPlatform(terminal?: TerminalApp): TerminalApp {
+  if (isWindows()) {
+    return terminal && isWindowsTerminalApp(terminal)
+      ? terminal
+      : "Windows Terminal";
+  }
+  return terminal && !isWindowsTerminalApp(terminal) ? terminal : "Terminal";
 }
 
-async function openInITerm(command: string, cwd: string): Promise<void> {
-  const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, "\\$");
-  const escapedCwd = cwd.replace(/"/g, '\\"');
+/** Launch a Claude CLI subcommand without interpolating its arguments. */
+export async function launchClaudeCommand(
+  args: string[],
+  projectPath?: string,
+): Promise<void> {
+  const command = await buildClaudeInvocationCommand(args);
+  await openTerminalWithCommand(command, { cwd: projectPath });
+}
 
-  const script = `
-    tell application "iTerm"
-      activate
-      create window with default profile
-      tell current session of current window
-        write text "cd \\"${escapedCwd}\\" && ${escapedCommand}"
+export async function openTerminalAtPath(projectPath: string): Promise<void> {
+  await openTerminalWithCommand(isWindows() ? "" : "exec $SHELL", {
+    cwd: projectPath,
+  });
+}
+
+export async function openWslTerminalAtPath(options: {
+  distribution: string;
+  cwd: string;
+}): Promise<void> {
+  if (!isWindows()) throw new Error("WSL Terminals Require Windows");
+  const preferences = getPreferenceValues<Preferences>();
+  const openIn = preferences.openIn || "window";
+  await openWindowsWslWithArgs(
+    ["--distribution", options.distribution, "--cd", options.cwd],
+    openIn,
+  );
+}
+
+async function buildClaudeInvocationCommand(args: string[]): Promise<string> {
+  const preferences = getPreferenceValues<Preferences>();
+  const claudePath = await getClaudePath();
+  if (!claudePath) throw new Error("Claude Code is not installed");
+  const spec = getClaudeSpawnSpec(claudePath, args);
+  const values = [spec.command, ...spec.args];
+  if (isWindows()) {
+    const configPrefix = preferences.claudeConfigPath
+      ? `$env:CLAUDE_CONFIG_DIR = ${quotePowerShellArgument(expandTilde(preferences.claudeConfigPath))}; `
+      : "";
+    return `${configPrefix}& ${values.map(quotePowerShellArgument).join(" ")}`;
+  }
+  const configPrefix = preferences.claudeConfigPath
+    ? `CLAUDE_CONFIG_DIR=${shellQuote(expandTilde(preferences.claudeConfigPath))} `
+    : "";
+  return configPrefix + values.map(shellQuote).join(" ");
+}
+
+async function openInTerminalApp(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
+  const shellCommand = buildShellCommandInDirectory(command, cwd);
+
+  if (openIn === "tab") {
+    // Cmd+T keystroke via System Events creates a real new tab in the front
+    // Terminal window. Requires Raycast Accessibility access.
+    const script = `on run argv
+      set shellCommand to item 1 of argv
+      tell application "Terminal"
+        activate
       end tell
-    end tell
-  `;
+      delay 0.2
+      tell application "System Events"
+        keystroke "t" using command down
+      end tell
+      delay 0.3
+      tell application "Terminal"
+        do script shellCommand in front window
+      end tell
+    end run`;
+    await execFilePromise("osascript", ["-e", script, shellCommand]);
+    return;
+  }
 
-  await execFilePromise("osascript", ["-e", script]);
+  // Window mode: write command to a temp .command file and open it with
+  // Terminal. `open -a Terminal file.command` always spawns a fresh window.
+  const tempFile = join(tmpdir(), `claudecast-${randomUUID()}.command`);
+  writeFileSync(
+    tempFile,
+    `#!/bin/bash\nrm -f -- ${shellQuote(tempFile)}\ncd ${shellQuote(cwd)} || exit 1\n${command}\n`,
+    { mode: 0o700 },
+  );
+  try {
+    await execFilePromise("open", ["-a", "Terminal", tempFile]);
+  } catch (error) {
+    try {
+      unlinkSync(tempFile);
+    } catch {
+      // Cleanup is best effort after a failed launch.
+    }
+    throw error;
+  }
 }
 
+async function openInITerm(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
+  const shellCommand = buildShellCommandInDirectory(command, cwd);
+
+  let script: string;
+  if (openIn === "tab") {
+    script = `on run argv
+      set shellCommand to item 1 of argv
+      tell application "iTerm"
+        activate
+        if (count of windows) > 0 then
+          tell current window
+            create tab with default profile
+            tell current session
+              write text shellCommand
+            end tell
+          end tell
+        else
+          create window with default profile
+          tell current session of current window
+            write text shellCommand
+          end tell
+        end if
+      end tell
+    end run`;
+  } else {
+    script = `on run argv
+      set shellCommand to item 1 of argv
+      tell application "iTerm"
+        activate
+        create window with default profile
+        tell current session of current window
+          write text shellCommand
+        end tell
+      end tell
+    end run`;
+  }
+
+  await execFilePromise("osascript", ["-e", script, shellCommand]);
+}
+
+// Escape a value for use inside a YAML double-quoted scalar (YAML 1.2).
+// Backslash must be escaped first; LF/CR/TAB get their YAML escape forms so
+// embedded whitespace can never break the document layout.
+function escapeYamlDoubleQuoted(s: string): string {
+  return s
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\t/g, "\\t");
+}
+
+// Warp launcher. Always opens a new window via a temporary YAML launch
+// configuration opened with `warp://launch/`. Warp's `warp://action/new_tab`
+// URL scheme and System Events Cmd+T keystroke are both unreliable, so we
+// don't expose a tab mode for Warp.
 async function openInWarp(command: string, cwd: string): Promise<void> {
-  // Warp supports a special URL scheme
-  const encodedCommand = encodeURIComponent(`cd "${cwd}" && ${command}`);
-  await open(`warp://action/new_tab?command=${encodedCommand}`);
+  const lcId = randomUUID();
+  const lcDir = join(homedir(), ".warp", "launch_configurations");
+  if (!existsSync(lcDir)) {
+    mkdirSync(lcDir, { recursive: true });
+  }
+  const lcFile = join(lcDir, `${lcId}.yaml`);
+  const yaml = `---
+name: ${lcId}
+windows:
+  - tabs:
+      - layout:
+          cwd: "${escapeYamlDoubleQuoted(cwd)}"
+          commands:
+            - exec: "${escapeYamlDoubleQuoted(command)}"
+`;
+  writeFileSync(lcFile, yaml, "utf-8");
+  await open(`warp://launch/${lcId}`);
+  // Clean up the temp config after launch
+  setTimeout(() => {
+    try {
+      unlinkSync(lcFile);
+    } catch {
+      /* ignore */
+    }
+  }, 30_000);
 }
 
-async function openInKitty(command: string, cwd: string): Promise<void> {
-  // Kitty can be invoked directly via execFile with array arguments
+async function openInKitty(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
+  // Real tabs require kitty's remote-control API, which the user must
+  // opt into by adding `allow_remote_control yes` and a `listen_on` socket
+  // to ~/.config/kitty/kitty.conf. If that's not configured, fall back
+  // to opening a new OS window.
+  if (openIn === "tab") {
+    try {
+      await execFilePromise("kitten", [
+        "@",
+        "launch",
+        "--type=tab",
+        `--cwd=${cwd}`,
+        "sh",
+        "-c",
+        command,
+      ]);
+      return;
+    } catch {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "Kitty Tab Could Not Be Opened",
+        message: "Remote control is unavailable. Opened a new window.",
+      });
+    }
+  }
   await execFilePromise("kitty", [
     "--single-instance",
     `--directory=${cwd}`,
@@ -117,33 +378,77 @@ async function openInKitty(command: string, cwd: string): Promise<void> {
   ]);
 }
 
-async function openInGhostty(command: string, cwd: string): Promise<void> {
-  const escapedCommand = command.replace(/"/g, '\\"').replace(/\$/g, "\\$");
-  const escapedCwd = cwd.replace(/"/g, '\\"');
+async function openInGhostty(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
+  // Use Ghostty's native AppleScript API with surface configuration.
+  // `new tab` opens the surface as a tab in the front window when one
+  // exists; `new window` always spawns a fresh window.
+  const target = openIn === "tab" ? "new tab" : "new window";
+  const script = `on run argv
+    set shellCommand to item 1 of argv
+    set workingDirectory to item 2 of argv
+    tell application "Ghostty"
+      activate
+      set cfg to new surface configuration
+      set initial working directory of cfg to workingDirectory
+      set initial input of cfg to shellCommand & (ASCII character 10)
+      ${target} with configuration cfg
+    end tell
+  end run`;
 
-  // Try direct invocation first via execFile with array arguments
-  try {
-    await execFilePromise("ghostty", [
-      `--working-directory=${cwd}`,
-      "-e",
-      "sh",
-      "-c",
-      command,
-    ]);
-  } catch {
-    // Fallback to AppleScript using execFile with array arguments
-    const script = `
-      tell application "Ghostty"
+  await execFilePromise("osascript", ["-e", script, command, cwd]);
+}
+
+/**
+ * Launch a command inside a cmux workspace.
+ *
+ * Tab mode uses `open -a cmux <dir>`, which routes through cmux's
+ * application:openFile: handler to create a new workspace in the front window
+ * with the shell's pwd set to <dir> (no `cd` typed). The cmux CLI socket is
+ * unreliable across installs, so we avoid it.
+ *
+ * Window mode uses cmux's AppleScript `new window` verb to spawn a fresh
+ * window, then types `cd "<cwd>" && <command>` via cmux's `perform action`
+ * Ghostty input pipeline (no System Events / Accessibility needed in either
+ * mode). Window mode pays the shell-escape cost on the cwd because there is
+ * no open-handler equivalent for "new window."
+ */
+async function openInCmux(
+  command: string,
+  cwd: string,
+  openIn: OpenIn,
+): Promise<void> {
+  if (openIn === "window") {
+    const shellCommand = buildShellCommandInDirectory(command, cwd);
+    const script = `on run argv
+      set shellCommand to item 1 of argv
+      tell application "cmux"
         activate
+        set w to new window
+        delay 0.7
+        perform action ("text:" & shellCommand & (ASCII character 10)) on focused terminal of selected tab of w
       end tell
-      delay 0.5
-      tell application "System Events"
-        keystroke "cd \\"${escapedCwd}\\" && ${escapedCommand}"
-        keystroke return
-      end tell
-    `;
-    await execFilePromise("osascript", ["-e", script]);
+    end run`;
+    await execFilePromise("osascript", ["-e", script, shellCommand]);
+    return;
   }
+
+  // Tab mode: open-handler creates a workspace in the front window with cwd
+  // set as the shell's process pwd.
+  await execFilePromise("open", ["-a", "cmux", cwd]);
+  // Wait for the new workspace's terminal to initialize. 700ms covers warm
+  // relaunches; cold first-launch tested at ~500ms.
+  await new Promise((resolve) => setTimeout(resolve, 700));
+  const script = `on run argv
+    set shellCommand to item 1 of argv
+    tell application "cmux"
+      perform action ("text:" & shellCommand & (ASCII character 10)) on focused terminal of selected tab of front window
+    end tell
+  end run`;
+  await execFilePromise("osascript", ["-e", script, command]);
 }
 
 /**
@@ -156,68 +461,111 @@ export async function launchClaudeCode(options: {
   forkSession?: boolean;
   prompt?: string;
   printMode?: boolean; // Use -p flag for non-interactive output
+  worktree?: boolean; // Start a new session in an isolated Git worktree
   dangerouslySkipPermissions?: boolean; // Skip permission prompts for autonomous workflows
   permissionMode?: PermissionMode; // Restore the session's original permission mode on resume
-  model?: string; // Restore the session's original model on resume
+  model?: string; // Override the model for new sessions only
+  wsl?: {
+    distribution: string;
+    cwd: string;
+    claudeExecutable?: string;
+  };
 }): Promise<void> {
-  const args: string[] = ["claude"];
+  const args = buildClaudeLaunchArgs({
+    ...options,
+    hasPrompt: Boolean(options.prompt),
+  });
 
-  // Add dangerous mode flag first if specified (for autonomous workflows like Ralph Loop)
-  if (options.dangerouslySkipPermissions) {
-    args.push("--dangerously-skip-permissions");
-  }
-
-  if (options.sessionId) {
-    args.push("-r", options.sessionId);
-    if (options.forkSession) {
-      args.push("--fork-session");
+  if (options.wsl) {
+    if (!isWindows()) throw new Error("WSL Sessions Require Windows");
+    const preferences = getPreferenceValues<Preferences>();
+    const openIn = preferences.openIn || "window";
+    let promptFile: string | undefined;
+    let wslArgs: string[];
+    if (options.prompt) {
+      promptFile = join(tmpdir(), `claudecast-wsl-prompt-${randomUUID()}.txt`);
+      writeFileSync(promptFile, options.prompt, {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
+      wslArgs = buildWslClaudePromptFileArgs(
+        options.wsl,
+        options.wsl.cwd,
+        args,
+        windowsPathToWslMountPath(promptFile),
+      );
+    } else {
+      wslArgs = buildWslClaudeArgs(options.wsl, options.wsl.cwd, args);
     }
-  } else if (options.continueSession) {
-    args.push("-c");
-  }
-
-  // Restore the session's permission mode (unless dangerouslySkipPermissions
-  // was already set explicitly, which implies bypassPermissions)
-  if (
-    options.permissionMode &&
-    options.permissionMode !== "default" &&
-    !options.dangerouslySkipPermissions
-  ) {
-    args.push("--permission-mode", options.permissionMode);
-  }
-
-  // Restore the session's model so a Haiku session doesn't resume with Opus
-  if (options.model) {
-    args.push("--model", options.model);
+    try {
+      await openWindowsWslWithArgs(wslArgs, openIn);
+      if (promptFile) {
+        const cleanup = setTimeout(() => {
+          try {
+            unlinkSync(promptFile!);
+          } catch {
+            // The WSL runner normally removes the prompt first.
+          }
+        }, 60_000);
+        cleanup.unref();
+      }
+    } catch (error) {
+      if (promptFile) {
+        try {
+          unlinkSync(promptFile);
+        } catch {
+          // Ignore cleanup after a failed launch.
+        }
+      }
+      throw error;
+    }
+    return;
   }
 
   if (options.prompt) {
-    // For complex prompts (multi-line, special chars), use a temp file to avoid escaping issues
-    const needsTempFile =
-      options.prompt.includes("\n") ||
-      options.prompt.includes("<") ||
-      options.prompt.includes(">");
+    const promptFile = join(tmpdir(), `claudecast-prompt-${randomUUID()}.txt`);
+    writeFileSync(promptFile, options.prompt, {
+      encoding: "utf-8",
+      mode: 0o600,
+    });
 
-    if (needsTempFile && !options.printMode) {
-      // Write prompt to temp file and use cat to pipe it
-      const tempFile = join(tmpdir(), `claudecast-prompt-${Date.now()}.txt`);
-      writeFileSync(tempFile, options.prompt, "utf-8");
-      // Use cat to pipe the prompt, then remove the temp file
-      const catCmd = `cat "${tempFile}" | claude; rm "${tempFile}"`;
-      await openTerminalWithCommand(catCmd, { cwd: options.projectPath });
-      return;
-    } else if (options.printMode) {
-      // Non-interactive mode - just print result and exit
-      args.push("-p", `"${options.prompt.replace(/"/g, '\\"')}"`);
-    } else {
-      // Interactive mode - start session with initial prompt
-      // Escape the prompt for shell and add as positional argument
-      args.push(`"${options.prompt.replace(/"/g, '\\"')}"`);
+    const invocation = await buildClaudeInvocationCommand([
+      ...args,
+      isWindows() ? "$claudecastPrompt" : '"$CLAUDECAST_PROMPT"',
+    ]);
+    const command = isWindows()
+      ? [
+          `$claudecastPrompt = [IO.File]::ReadAllText(${quotePowerShellArgument(promptFile)})`,
+          `Remove-Item -LiteralPath ${quotePowerShellArgument(promptFile)} -Force`,
+          invocation.replace(
+            quotePowerShellArgument("$claudecastPrompt"),
+            "$claudecastPrompt",
+          ),
+        ].join("; ")
+      : [
+          `CLAUDECAST_PROMPT_FILE=${shellQuote(promptFile)}`,
+          'CLAUDECAST_PROMPT=$(cat -- "$CLAUDECAST_PROMPT_FILE")',
+          'rm -f -- "$CLAUDECAST_PROMPT_FILE"',
+          invocation.replace(
+            shellQuote('"$CLAUDECAST_PROMPT"'),
+            '"$CLAUDECAST_PROMPT"',
+          ),
+        ].join("; ");
+
+    try {
+      await openTerminalWithCommand(command, { cwd: options.projectPath });
+    } catch (error) {
+      try {
+        unlinkSync(promptFile);
+      } catch {
+        // The terminal may already have removed it.
+      }
+      throw error;
     }
+    return;
   }
 
-  const command = args.join(" ");
-  await openTerminalWithCommand(command, { cwd: options.projectPath });
+  await launchClaudeCommand(args, options.projectPath);
 }
 
 /**
@@ -234,29 +582,287 @@ export async function launchRalphFreshLoop(options: {
   maxIterations: number;
 }): Promise<void> {
   const { projectPath, task, requirements, maxIterations } = options;
-
-  // Generate the bash script that orchestrates fresh context sessions
-  const scriptContent = generateRalphScript(task, requirements, maxIterations);
-
-  // Write script to temp file
-  const scriptFile = join(tmpdir(), `ralph-fresh-${Date.now()}.sh`);
-  writeFileSync(scriptFile, scriptContent, { mode: 0o755 });
+  validateRalphOptions(task, maxIterations);
+  const preferences = getPreferenceValues<Preferences>();
+  const claudePath = await getClaudePath();
+  if (!claudePath) throw new Error("Claude Code is not installed");
+  const claudeSpec = getClaudeSpawnSpec(claudePath, []);
+  const claudeEntry = claudeSpec.args[0];
 
   // Create the .ralph directory with initial task info (plan will be generated by first Claude session)
   const ralphDir = join(projectPath, ".ralph");
   const taskFile = join(ralphDir, "task.md");
   const taskContent = generateTaskFile(task, requirements);
+  mkdirSync(ralphDir, { recursive: true });
+  writeFileSync(taskFile, taskContent, "utf-8");
 
-  // Command to setup and run the script
-  const setupAndRunCmd = `
-mkdir -p "${ralphDir}" && \\
-cat > "${taskFile}" << 'TASK_EOF'
-${taskContent}
-TASK_EOF
-bash "${scriptFile}"; rm -f "${scriptFile}"
-`.trim();
+  if (isWindows()) {
+    const runnerFile = join(ralphDir, "runner.ps1");
+    const resumeFile = join(ralphDir, "resume.ps1");
+    writeFileSync(
+      runnerFile,
+      "\uFEFF" +
+        generateRalphPowerShellScript(
+          maxIterations,
+          claudeSpec.command,
+          claudeEntry,
+          preferences.claudeConfigPath
+            ? expandTilde(preferences.claudeConfigPath)
+            : undefined,
+        ),
+      "utf-8",
+    );
+    writeFileSync(
+      resumeFile,
+      `\uFEFFparam([int]$MaxIterations = 10)\n& (Join-Path $PSScriptRoot "runner.ps1") -MaxIterations $MaxIterations -Resume\n`,
+      "utf-8",
+    );
+    const configPrefix = preferences.claudeConfigPath
+      ? `$env:CLAUDE_CONFIG_DIR = ${quotePowerShellArgument(expandTilde(preferences.claudeConfigPath))}; `
+      : "";
+    const executablePrefix = [
+      `$env:CLAUDECAST_CLAUDE_COMMAND = ${quotePowerShellArgument(claudeSpec.command)}`,
+      claudeEntry
+        ? `$env:CLAUDECAST_CLAUDE_ENTRY = ${quotePowerShellArgument(claudeEntry)}`
+        : `$env:CLAUDECAST_CLAUDE_ENTRY = ''`,
+    ].join("; ");
+    await openTerminalWithCommand(
+      `${configPrefix}${executablePrefix}; Set-ExecutionPolicy -Scope Process Bypass -Force; & ${quotePowerShellArgument(runnerFile)} -MaxIterations ${maxIterations}`,
+      { cwd: projectPath },
+    );
+    return;
+  }
+
+  const scriptContent = generateRalphScript(
+    maxIterations,
+    claudeSpec.command,
+    claudeEntry,
+    preferences.claudeConfigPath
+      ? expandTilde(preferences.claudeConfigPath)
+      : undefined,
+  );
+  const scriptFile = join(tmpdir(), `ralph-fresh-${randomUUID()}.sh`);
+  writeFileSync(scriptFile, scriptContent, { mode: 0o755 });
+
+  const configPrefix = preferences.claudeConfigPath
+    ? `CLAUDE_CONFIG_DIR=${shellQuote(expandTilde(preferences.claudeConfigPath))} `
+    : "";
+  const executablePrefix = [
+    `CLAUDECAST_CLAUDE_COMMAND=${shellQuote(claudeSpec.command)}`,
+    `CLAUDECAST_CLAUDE_ENTRY=${shellQuote(claudeEntry || "")}`,
+  ].join(" ");
+  const setupAndRunCmd = `${configPrefix}${executablePrefix} bash ${shellQuote(scriptFile)}; rm -f -- ${shellQuote(scriptFile)}`;
 
   await openTerminalWithCommand(setupAndRunCmd, { cwd: projectPath });
+}
+
+function generateRalphPowerShellScript(
+  defaultMaxIterations: number,
+  claudeCommand: string,
+  claudeEntry?: string,
+  claudeConfigPath?: string,
+): string {
+  return `param(
+  [int]$MaxIterations = ${defaultMaxIterations},
+  [switch]$Resume
+)
+
+$ErrorActionPreference = "Stop"
+if (!$env:CLAUDECAST_CLAUDE_COMMAND) {
+  $env:CLAUDECAST_CLAUDE_COMMAND = ${quotePowerShellArgument(claudeCommand)}
+}
+if (!$env:CLAUDECAST_CLAUDE_ENTRY) {
+  $env:CLAUDECAST_CLAUDE_ENTRY = ${quotePowerShellArgument(claudeEntry || "")}
+}
+${claudeConfigPath ? `if (!$env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR = ${quotePowerShellArgument(claudeConfigPath)} }` : ""}
+$RalphDir = Join-Path (Get-Location) ".ralph"
+$TaskFile = Join-Path $RalphDir "task.md"
+$PlanFile = Join-Path $RalphDir "plan.md"
+$StopFile = Join-Path $RalphDir "stop"
+$SignalFile = Join-Path $RalphDir "signal"
+$LogFile = Join-Path $RalphDir "loop.log"
+$StopToken = "###RALPH_TASK_COMPLETE###"
+
+function Write-RalphLog([string]$Message, [string]$Level = "INFO") {
+  $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Level\`: $Message"
+  Write-Host "[Ralph] $Message"
+  Add-Content -LiteralPath $LogFile -Value $line -Encoding UTF8
+}
+
+function Get-TaskLines {
+  if (!(Test-Path -LiteralPath $PlanFile)) { return @() }
+  return @(Get-Content -LiteralPath $PlanFile -Encoding UTF8 | Where-Object { $_ -match '^- \\[[ x]\\] ' })
+}
+
+function Get-RemainingTasks {
+  return @(Get-TaskLines | Where-Object { $_ -match '^- \\[ \\] ' })
+}
+
+function Get-Progress {
+  $tasks = @(Get-TaskLines)
+  $done = @($tasks | Where-Object { $_ -match '^- \\[x\\] ' }).Count
+  return "$done/$($tasks.Count)"
+}
+
+function Invoke-ClaudePrompt([string]$Prompt) {
+  Remove-Item -LiteralPath $SignalFile -Force -ErrorAction SilentlyContinue
+
+  $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $startInfo.FileName = "$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+  $startInfo.Arguments = '-NoLogo -NoProfile -Command "if ($env:CLAUDECAST_CLAUDE_ENTRY) { & $env:CLAUDECAST_CLAUDE_COMMAND $env:CLAUDECAST_CLAUDE_ENTRY --dangerously-skip-permissions } else { & $env:CLAUDECAST_CLAUDE_COMMAND --dangerously-skip-permissions }"'
+  $startInfo.WorkingDirectory = (Get-Location).Path
+  $startInfo.UseShellExecute = $false
+  $startInfo.RedirectStandardInput = $true
+  $startInfo.StandardInputEncoding = [System.Text.UTF8Encoding]::new($false)
+
+  $claudeProcess = [System.Diagnostics.Process]::new()
+  $claudeProcess.StartInfo = $startInfo
+  if (!$claudeProcess.Start()) { throw "Claude Code could not be started" }
+  $claudeProcess.StandardInput.Write($Prompt)
+  $claudeProcess.StandardInput.Close()
+
+  while (!$claudeProcess.HasExited) {
+    $stopRequested = Test-Path -LiteralPath $StopFile
+    if (
+      $stopRequested -or
+      ((Test-Path -LiteralPath $SignalFile) -and
+       (Select-String -LiteralPath $SignalFile -SimpleMatch $StopToken -Quiet))
+    ) {
+      if (!$stopRequested) { Start-Sleep -Seconds 2 }
+      try {
+        & "$env:SystemRoot\\System32\\taskkill.exe" /PID $claudeProcess.Id /T /F | Out-Null
+        $claudeProcess.WaitForExit(5000)
+      } catch {
+        throw "Claude process tree could not be stopped: $_"
+      }
+      if (!$claudeProcess.HasExited) {
+        throw "Claude process tree did not exit after taskkill"
+      }
+      break
+    }
+    Start-Sleep -Milliseconds 750
+  }
+
+  $completed =
+    (Test-Path -LiteralPath $SignalFile) -and
+    (Select-String -LiteralPath $SignalFile -SimpleMatch $StopToken -Quiet)
+  Remove-Item -LiteralPath $SignalFile -Force -ErrorAction SilentlyContinue
+  return $completed
+}
+
+if (!(Test-Path -LiteralPath $TaskFile)) {
+  throw "No .ralph/task.md file was found"
+}
+
+Write-RalphLog "Ralph Fresh Context Loop"
+Write-RalphLog "Stop gracefully by creating .ralph/stop"
+
+if (!(Test-Path -LiteralPath $PlanFile)) {
+  $taskText = Get-Content -LiteralPath $TaskFile -Raw -Encoding UTF8
+  $planningPrompt = @"
+You are a senior software architect preparing an implementation plan for autonomous coding sessions with fresh context.
+
+Read the requested work below:
+
+$taskText
+
+Create .ralph/plan.md with this structure:
+
+# Implementation Plan
+
+## Overview
+[What is being built and the smallest sound architecture]
+
+## Architecture Notes
+- [Decisions future sessions must preserve]
+
+## Tasks
+
+### Phase 1: Foundation
+- [ ] [Atomic task] | Acceptance: [Concrete verification]
+
+### Phase 2: Core Features
+- [ ] [Atomic task] | Acceptance: [Concrete verification]
+
+### Phase 3: Integration and Testing
+- [ ] [Atomic task] | Acceptance: [Concrete verification]
+
+### Phase 4: Documentation
+- [ ] [Atomic task] | Acceptance: [Concrete verification]
+
+## Progress Log
+
+## Technical Context
+
+Keep the plan between 6 and $([Math]::Max(8, [Math]::Min(30, $MaxIterations - 2))) tasks. Each task must be self-contained, atomic, and verifiable. Start with the smallest working implementation. Include tests beside the behavior they cover.
+
+When the plan is complete, run this exact PowerShell command:
+Set-Content -LiteralPath .ralph/signal -Value "###RALPH_TASK_COMPLETE###"
+"@
+  Write-RalphLog "Planning tasks"
+  if (!(Invoke-ClaudePrompt $planningPrompt)) {
+    Write-RalphLog "Planning session ended without a completion signal" "WARN"
+  }
+  if (Test-Path -LiteralPath $StopFile) {
+    Remove-Item -LiteralPath $StopFile -Force
+    Write-RalphLog "Stop file detected"
+    exit 0
+  }
+  if (!(Test-Path -LiteralPath $PlanFile)) {
+    throw "Claude did not create .ralph/plan.md"
+  }
+}
+
+for ($iteration = 1; $iteration -le $MaxIterations; $iteration++) {
+  if (Test-Path -LiteralPath $StopFile) {
+    Remove-Item -LiteralPath $StopFile -Force
+    Write-RalphLog "Stop file detected"
+    exit 0
+  }
+
+  $remaining = @(Get-RemainingTasks)
+  if ($remaining.Count -eq 0) {
+    Write-RalphLog "All tasks completed ($(Get-Progress))" "SUCCESS"
+    exit 0
+  }
+
+  $nextTask = $remaining[0] -replace '^- \\[ \\] ', ''
+  Write-RalphLog "Iteration $iteration/$MaxIterations, progress $(Get-Progress)"
+  Write-RalphLog "Next task: $nextTask"
+
+  $executionPrompt = @"
+You are an autonomous coding agent. This task runs in a fresh context.
+
+CURRENT TASK:
+$nextTask
+
+PROTOCOL:
+1. Read .ralph/plan.md, its Architecture Notes and Technical Context, and the relevant source files.
+2. Complete only the current task.
+3. Run the acceptance checks and relevant tests.
+4. Mark this task [x] in .ralph/plan.md. Add a dated Progress Log entry and any facts future sessions need.
+5. Signal completion with this exact PowerShell command:
+   Set-Content -LiteralPath .ralph/signal -Value "###RALPH_TASK_COMPLETE###"
+
+Make reasonable decisions when details are missing. Do not begin the next task.
+"@
+
+  if (Invoke-ClaudePrompt $executionPrompt) {
+    Write-RalphLog "Task completed" "SUCCESS"
+  } else {
+    Write-RalphLog "Task session ended without a completion signal" "WARN"
+  }
+  Start-Sleep -Seconds 2
+}
+
+$remainingCount = @(Get-RemainingTasks).Count
+if ($remainingCount -gt 0) {
+  Write-RalphLog "Maximum iterations reached with $remainingCount tasks remaining" "WARN"
+  Write-Host "Resume with: powershell -ExecutionPolicy Bypass -File .ralph\\resume.ps1 10"
+  exit 1
+}
+Write-RalphLog "All tasks completed" "SUCCESS"
+`;
 }
 
 /**
@@ -296,14 +902,11 @@ _This file stores the original task. See plan.md for the breakdown into atomic t
  * JavaScript template literal interpolation of bash variables like ${VAR}
  */
 function generateRalphScript(
-  task: string,
-  requirements: string,
   maxIterations: number,
+  claudeCommand: string,
+  claudeEntry?: string,
+  claudeConfigPath?: string,
 ): string {
-  // Escape single quotes for bash heredoc
-  const escapedTask = task.replace(/'/g, "'\\''");
-  const escapedReqs = requirements.replace(/'/g, "'\\''");
-
   // Use dollar sign variable to avoid ESLint escaping issues
   const $ = "$";
 
@@ -318,6 +921,18 @@ function generateRalphScript(
 # Key: Claude creates .ralph/done marker file when finished, watcher kills process
 
 set -e
+
+CLAUDECAST_CLAUDE_COMMAND=${shellQuote(claudeCommand)}
+CLAUDECAST_CLAUDE_ENTRY=${shellQuote(claudeEntry || "")}
+${claudeConfigPath ? `export CLAUDE_CONFIG_DIR=${shellQuote(claudeConfigPath)}` : ""}
+
+run_claude_command() {
+    if [[ -n "${$}{CLAUDECAST_CLAUDE_ENTRY:-}" ]]; then
+        exec "${$}{CLAUDECAST_CLAUDE_COMMAND}" "${$}{CLAUDECAST_CLAUDE_ENTRY}" "${$}@"
+    else
+        exec "${$}{CLAUDECAST_CLAUDE_COMMAND}" "${$}@"
+    fi
+}
 
 RALPH_DIR=".ralph"
 TASK_FILE="${$}{RALPH_DIR}/task.md"
@@ -397,12 +1012,16 @@ run_claude_with_watcher() {
     rm -f "${$}SIGNAL_FILE"
 
     # Run Claude in background so we can capture its PID
-    cat "${$}PROMPT_FILE" | claude --dangerously-skip-permissions &
+    cat "${$}PROMPT_FILE" | run_claude_command --dangerously-skip-permissions &
     CLAUDE_PID=${$}!
 
     # Start background watcher that monitors signal file for stop token
     (
         while true; do
+            if [[ -f "${$}STOP_FILE" ]]; then
+                kill -9 ${$}CLAUDE_PID 2>/dev/null || true
+                exit 0
+            fi
             # Check if signal file exists and contains stop token
             if [[ -f "${$}SIGNAL_FILE" ]] && grep -q "${$}STOP_TOKEN" "${$}SIGNAL_FILE" 2>/dev/null; then
                 # Give Claude a moment to finish any final output
@@ -456,6 +1075,18 @@ generate_resume_script() {
 
 set -e
 
+CLAUDECAST_CLAUDE_COMMAND=${shellQuote(claudeCommand)}
+CLAUDECAST_CLAUDE_ENTRY=${shellQuote(claudeEntry || "")}
+${claudeConfigPath ? `export CLAUDE_CONFIG_DIR=${shellQuote(claudeConfigPath)}` : ""}
+
+run_claude_command() {
+    if [[ -n "${$}{CLAUDECAST_CLAUDE_ENTRY:-}" ]]; then
+        exec "${$}{CLAUDECAST_CLAUDE_COMMAND}" "${$}{CLAUDECAST_CLAUDE_ENTRY}" "${$}@"
+    else
+        exec "${$}{CLAUDECAST_CLAUDE_COMMAND}" "${$}@"
+    fi
+}
+
 MAX_ITERATIONS=${$}{1:-10}
 RALPH_DIR=".ralph"
 PLAN_FILE="${$}{RALPH_DIR}/plan.md"
@@ -493,10 +1124,14 @@ run_claude_with_watcher() {
     local PROMPT_FILE="${$}1"
     local WATCHER_PID="" CLAUDE_PID=""
     rm -f "${$}SIGNAL_FILE"
-    cat "${$}PROMPT_FILE" | claude --dangerously-skip-permissions &
+    cat "${$}PROMPT_FILE" | run_claude_command --dangerously-skip-permissions &
     CLAUDE_PID=${$}!
     (
         while true; do
+            if [[ -f "${$}STOP_FILE" ]]; then
+                kill -9 ${$}CLAUDE_PID 2>/dev/null || true
+                exit 0
+            fi
             if [[ -f "${$}SIGNAL_FILE" ]] && grep -q "${$}STOP_TOKEN" "${$}SIGNAL_FILE" 2>/dev/null; then
                 sleep 2; kill -9 ${$}CLAUDE_PID 2>/dev/null || true; exit 0
             fi
@@ -605,7 +1240,8 @@ if [ ! -f "${$}PLAN_FILE" ]; then
 
     # Write planning prompt to temp file
     PLANNING_PROMPT_FILE="${$}(mktemp)"
-    cat > "${$}PLANNING_PROMPT_FILE" << 'PLANNING_EOF'
+    TASK_DETAILS="${$}(cat "${$}TASK_FILE")"
+    cat > "${$}PLANNING_PROMPT_FILE" << PLANNING_EOF
 You are a senior software architect creating a detailed implementation plan for an autonomous coding system.
 
 CRITICAL: This plan will be executed by AI agents with FRESH CONTEXT for each task. Each task must be:
@@ -615,11 +1251,8 @@ CRITICAL: This plan will be executed by AI agents with FRESH CONTEXT for each ta
 
 === PROJECT DETAILS ===
 
-MAIN GOAL:
-${escapedTask}
-
-REQUIREMENTS:
-${escapedReqs}
+REQUESTED WORK:
+${$}TASK_DETAILS
 
 === PLANNING PHILOSOPHY: MVP FIRST ===
 
@@ -764,6 +1397,12 @@ PLANNING_EOF
     fi
 
     rm -f "${$}PLANNING_PROMPT_FILE"
+
+    if [ -f "${$}STOP_FILE" ]; then
+        log_warning "Stop file detected."
+        rm -f "${$}STOP_FILE"
+        exit 0
+    fi
 
     # Verify plan was created
     if [ ! -f "${$}PLAN_FILE" ]; then
@@ -919,13 +1558,16 @@ fi
  * Get list of available terminal apps
  */
 export async function getAvailableTerminals(): Promise<TerminalApp[]> {
-  const terminals: TerminalApp[] = ["Terminal"]; // Always available
+  if (isWindows()) return getAvailableWindowsTerminals();
+
+  const terminals: TerminalApp[] = ["Terminal"];
 
   const checks: [string, TerminalApp][] = [
     ["iTerm", "iTerm"],
     ["Warp", "Warp"],
     ["kitty", "kitty"],
     ["Ghostty", "Ghostty"],
+    ["cmux", "cmux"],
   ];
 
   for (const [appName, terminal] of checks) {

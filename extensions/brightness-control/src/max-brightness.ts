@@ -1,35 +1,18 @@
-import { showHUD, showToast, Toast } from "@raycast/api";
-import { ensureLunarReady, getDisplays, getCursorDisplay, setBrightnessForDisplay } from "./utils/lunar";
+import { getPreferenceValues, showToast, Toast } from "@raycast/api";
+import { setBrightness } from "./utils/platform";
+import { showBrightnessFeedback } from "./utils/feedback";
 
 export default async function Command() {
-  if (!(await ensureLunarReady())) {
-    return;
-  }
-
+  const { closeRaycast = true, showDisplayName = true } = getPreferenceValues<Preferences.MaxBrightness>();
   try {
-    const allDisplays = await getDisplays();
+    const result = await setBrightness(100);
+    if (!result) return;
 
-    if (allDisplays.length === 0) {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "No Displays Found",
-        message: "Make sure Lunar is running and displays are connected",
-      });
-      return;
-    }
-
-    // Get the display where cursor is currently located
-    const cursorDisplaySerial = await getCursorDisplay();
-
-    let targetDisplay = allDisplays.find((d) => d.serial === cursorDisplaySerial);
-
-    if (!targetDisplay) {
-      targetDisplay = allDisplays.find((d) => d.main) || allDisplays[0];
-    }
-
-    await setBrightnessForDisplay(targetDisplay.serial, 100, targetDisplay.adaptive);
-
-    await showHUD(`🚀 ${targetDisplay.name}: Brightness to the max!`);
+    const message =
+      showDisplayName && result.displayName && result.brightness != null
+        ? `🚀 ${result.displayName}: ${result.brightness}%`
+        : "🚀 Brightness to the maximum!";
+    await showBrightnessFeedback(message, closeRaycast);
   } catch (error) {
     console.error("Failed to set max brightness:", error);
     await showToast({

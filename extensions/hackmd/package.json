@@ -6,7 +6,8 @@
   "icon": "command-icon.png",
   "author": "Yukai",
   "contributors": [
-    "ridemountainpig"
+    "ridemountainpig",
+    "alexi.build"
   ],
   "categories": [
     "Productivity",
@@ -960,5 +961,8 @@
     "fix-lint": "ray lint --fix",
     "lint": "ray lint",
     "publish": "ray publish"
+  },
+  "overrides": {
+    "brace-expansion": "5.0.9"
   }
 }

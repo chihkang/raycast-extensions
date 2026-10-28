@@ -1,5 +1,59 @@
 # Granola Changelog
 
+## [2.2.2 - Resume Sign-in After Browser Approval] - 2026-10-17
+
+- Fix sign-in not completing when Raycast closes while you approve access in the browser. The pending sign-in is now saved and finishes automatically the next time you open any Granola command.
+
+## [2.2.1 - Sign-in Fix for Raycast 2.8] - 2026-10-16
+
+- Fix sign-in timing out on Raycast 2.8 (`extensionHost.render timed out`), which left every view command unusable. The sign-in illustration now uses static image assets instead of a runtime-generated SVG.
+
+## [Meeting Actions Skill] - 2026-09-24
+
+- Update to Raycast API 2.5.0 for public bundled-skill support.
+- Add a skill for extracting decisions, action items, and open questions from meeting notes or a weekly review.
+- Include source references, stated owners and deadlines, and clear gaps when notes or attribution are unavailable.
+
+## [2.2.0 - OAuth Authentication] - 2026-09-07
+
+- Add OAuth sign-in with secure token storage and automatic refresh on macOS and Windows.
+- Fix 404 errors when listing notes by using Granola's current POST request format.
+- Fix folder membership IDs and missing enhanced summaries in exports; prevent empty note nodes from producing literal `undefined` text.
+- Add copyable error diagnostics that exclude credentials and meeting content.
+- Recover server-rejected access tokens automatically and retry reads once, without replaying writes or generation requests.
+- Update Raycast dependencies and the lockfile to resolve dependency advisories.
+
+## [Sortable date prefixes for exports] - 2026-05-29
+
+- Prefix exported note and transcript filenames with ISO-8601 creation date
+- Sorting files by name now yields chronological order
+
+## [2.1.4] - 2026-05-26
+
+### Bug Fixes
+
+- Automatically refresh expired WorkOS access tokens via Granola's `refresh-access-token` API and persist updated tokens locally, so Search Notes and other commands work again without requiring the Granola app to refresh the session first.
+
+### Enhancements
+
+- Added structured `[Granola]` dev-console logging across auth, fetch, and error UI paths to make troubleshooting easier during `npm run dev`.
+
+## [2.1.3] - 2026-05-08
+
+### New Features
+
+- Added the `manage-folders` AI tool to create, delete, and organize Granola folders.
+- Added a local stored-account authentication fallback so the extension can still fetch notes and transcripts when Granola no longer exposes a usable plaintext WorkOS/Cognito token.
+
+### Enhancements
+
+- Improved Granola API helpers for folder, recipe, note content, and transcript workflows.
+
+### Bug Fixes
+
+- Fixed Granola auth detection for users seeing empty note lists, "no search results", or missing transcript exports despite being logged in to the Granola desktop app. This addresses [#27740](https://github.com/raycast/extensions/issues/27740) and [#27744](https://github.com/raycast/extensions/issues/27744).
+
+
 ## [2.1.2] - 2026-02-03
 
 ### 🎨 Visual Updates
@@ -182,4 +236,4 @@ and many many more fixes and improvements, etc!
 - Added Granola extension
 - Added `New Note` command, which starts a new note and recording immediately in Granola
 - Added `Search Notes` command, which allows you to view your notes in a list, view their details, copy their links, or copy their contents as HTML or Markdown
-- Added `AI Notes` AI command, which allows you to use Raycast AI on top of Granola and other AI extensions 
+- Added `AI Notes` AI command, which allows you to use Raycast AI on top of Granola and other AI extensions

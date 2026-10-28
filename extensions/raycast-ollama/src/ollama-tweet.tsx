@@ -1,11 +1,10 @@
 import { getPreferenceValues } from "@raycast/api";
-import { Preferences } from "./lib/types";
 import { Creativity } from "./lib/enum";
 import { CommandAnswer } from "./lib/settings/enum";
 import { AnswerView } from "./lib/ui/AnswerView/main";
 import { OllamaApiModelCapability } from "./lib/ollama/enum";
 
-const pref = getPreferenceValues<Preferences>();
+const pref = getPreferenceValues<Preferences.OllamaTweet>();
 if (!pref.ollamaCertificateValidation) process.env["NODE_TLS_REJECT_UNAUTHORIZED"] = "0";
 
 export default function Command(): React.JSX.Element {
@@ -35,6 +34,7 @@ Tweet:`;
       prompt={p}
       creativity={Creativity.High}
       capabilities={[OllamaApiModelCapability.COMPLETION]}
+      autoReplace={pref.ollamaAutoReplace}
     />
   );
 }
