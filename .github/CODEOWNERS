@@ -410,6 +410,7 @@
 /extensions/choose-a-license                                        @sandypockets @Aayush9029 @muhammadrizo-y
 /extensions/chords-and-tabs                                         @BossElijah
 /extensions/chrome-profile-links                                    @H-Tadashi
+/extensions/chromium-extension-audit                                @0xdhrv
 /extensions/chronometer                                             @mandrade2
 /extensions/chuck-norris-facts                                      @jorgecortesdev
 /extensions/cider                                                   @feyli
@@ -433,7 +434,7 @@
 /extensions/claude-sessions                                         @kud
 /extensions/claudecast                                              @qazi0 @RoderickJDunn @diskun00
 /extensions/clean-agent-text                                        @rhukster
-/extensions/clean-keyboard                                          @ike-gg @owain-williams @xilopaint @ridemountainpig @LitoMore @yusifaliyevpro @shivraj-roy @alexibuild
+/extensions/clean-keyboard                                          @ike-gg @owain-williams @xilopaint @ridemountainpig @LitoMore @yusifaliyevpro @shivraj-roy @alexibuild @nawwwal
 /extensions/clean-text                                              @MoisesCervera
 /extensions/cleanshotx                                              @Aayush9029 @lukaszmtw @erics118 @mlnchk @pernielsentikaer @0xdhrv
 /extensions/clear-clipboard                                         @d3caf
@@ -2859,6 +2860,7 @@
 /extensions/strftime-cheatsheet                                     @antonengelhardt
 /extensions/string-formatter                                        @fireice009
 /extensions/stripe                                                  @pradeepb28 @farisaziz12 @bradgarropy @remorses @pernielsentikaer
+/extensions/style-dictionary                                        @ars2062
 /extensions/subflow                                                 @ridemountainpig
 /extensions/sublime                                                 @phgn0
 /extensions/subnets                                                 @k1rk
@@ -3419,7 +3421,7 @@
 /extensions/your-name-in-landsat                                    @clins1994 @0xdhrv
 /extensions/yourls                                                  @firhanram @xmok
 /extensions/youtrack                                                @tiulpin @skoch13 @GrimbiXcode @ruslan-korneev @Just-Me-22
-/extensions/youtube                                                 @tonka3000 @SKaplanOfficial @madza91 @xilopaint @yug2005 @ridemountainpig @0xdhrv
+/extensions/youtube                                                 @tonka3000 @SKaplanOfficial @madza91 @xilopaint @yug2005 @ridemountainpig @0xdhrv @alexibuild
 /extensions/youtube-companion                                       @sasivarnan @yusifaliyevpro
 /extensions/youtube-highlights                                      @getdekoded
 /extensions/youtube-music                                           @danieldbird @AlexStrNik @zach-fuller @gnosticdev
